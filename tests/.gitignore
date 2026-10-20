@@ -1,0 +1,4 @@
+.certs/
+.venv/
+__pycache__/
+shots/

@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="cs">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data: blob:; media-src 'self' blob:; connect-src https://api.github.com; manifest-src 'self'; worker-src 'self'; base-uri 'none'; form-action 'none'">
+<meta name="theme-color" content="#f6f1e7" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#15191a" media="(prefers-color-scheme: dark)">
+<title>Zápisky z hodin</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icons/icon-192.png">
+<link rel="stylesheet" href="css/app.css">
+</head>
+<body>
+<div id="app" class="shell">
+  <header class="top"><a class="brand" href="#/"><span class="mark" aria-hidden="true"></span><span id="brandText">Zápisky z hodin</span></a><span id="netDot" class="netdot" role="status"></span></header>
+  <main id="view" tabindex="-1"></main>
+  <nav id="nav" class="nav" aria-label="Main"></nav>
+</div>
+<noscript>JavaScript is required.</noscript>
+<script type="module" src="js/main.js"></script>
+</body>
+</html>

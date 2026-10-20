@@ -32,3 +32,22 @@ def test_absorb_small_speakers():
     assert [x["speaker"] for x in out] == ["A", "A", "C"] or [x["speaker"] for x in out] == ["A", "C", "C"]
     only_small = [{"start": 0, "end": 5, "speaker": "A"}, {"start": 5, "end": 9, "speaker": "B"}]
     assert diar.absorb_small_speakers(only_small, 20) == only_small
+
+
+def test_to_wav16k_rejects_playlist_and_other_protocols(tmp_path):
+    """Security: a crafted 'audio' file that is really a playlist must not make ffmpeg open other files/URLs."""
+    import subprocess
+    import pytest
+    from lesson_worker.audio import AudioCorrupt, to_wav16k
+    good = tmp_path / "tone.opus"
+    subprocess.run(["ffmpeg", "-v", "error", "-f", "lavfi", "-i", "sine=frequency=440:duration=1", "-c:a", "libopus", str(good)], check=True)
+    assert to_wav16k(good, tmp_path / "ok.wav") > 0.5
+    for name, body in {
+        "concat.opus": "ffconcat version 1.0\nfile 'tone.opus'\n",  # relative path: plain ffmpeg would happily decode this
+        "hls.opus": f"#EXTM3U\n#EXTINF:1,\n{good}\n",
+        "net.opus": "ffconcat version 1.0\nfile 'http://127.0.0.1:9/x.opus'\n",
+    }.items():
+        bad = tmp_path / name
+        bad.write_text(body)
+        with pytest.raises(AudioCorrupt):
+            to_wav16k(bad, tmp_path / (name + ".wav"))

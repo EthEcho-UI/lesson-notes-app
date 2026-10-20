@@ -1,0 +1,153 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://lesson-notes.invalid/schemas/note.schema.json",
+  "title": "Note (lesson or meeting) metadata",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "id": {
+      "type": "string",
+      "pattern": "^[0-9A-HJKMNP-TV-Z]{26}$"
+    },
+    "kind": {
+      "enum": [
+        "lesson",
+        "meeting"
+      ]
+    },
+    "title": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 200
+    },
+    "notebook_id": {
+      "type": "string",
+      "pattern": "^[0-9A-HJKMNP-TV-Z]{26}$"
+    },
+    "created_at": {
+      "type": "string",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?Z$"
+    },
+    "updated_at": {
+      "type": "string",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?Z$"
+    },
+    "recorded_at": {
+      "type": "string",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?Z$"
+    },
+    "source": {
+      "enum": [
+        "pwa",
+        "laptop"
+      ]
+    },
+    "language": {
+      "type": "string",
+      "pattern": "^[a-z]{2,3}$",
+      "default": "cs"
+    },
+    "parts": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 50,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "order",
+          "filename",
+          "bytes",
+          "sha256",
+          "duration",
+          "uploaded_at",
+          "status"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^p[0-9]{2}$"
+          },
+          "order": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 99
+          },
+          "filename": {
+            "type": "string",
+            "pattern": "^[0-9]{2}\\.(opus|ogg|m4a|mp3|wav|webm|flac)$"
+          },
+          "bytes": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 90000000
+          },
+          "sha256": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "duration": {
+            "oneOf": [
+              {
+                "type": "number",
+                "minimum": 0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "seconds, client-measured, may be null; worker-measured value lives in transcript.json"
+          },
+          "uploaded_at": {
+            "oneOf": [
+              {
+                "type": "string",
+                "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?Z$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "status": {
+            "enum": [
+              "uploading",
+              "uploaded",
+              "failed"
+            ]
+          }
+        },
+        "if": {
+          "properties": {
+            "status": {
+              "const": "uploaded"
+            }
+          }
+        },
+        "then": {
+          "properties": {
+            "uploaded_at": {
+              "type": "string",
+              "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?Z$"
+            }
+          }
+        }
+      }
+    }
+  },
+  "required": [
+    "schema_version",
+    "id",
+    "kind",
+    "title",
+    "notebook_id",
+    "created_at",
+    "source",
+    "language",
+    "parts"
+  ]
+}

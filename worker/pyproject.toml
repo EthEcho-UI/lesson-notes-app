@@ -1,0 +1,34 @@
+[project]
+name = "lesson-worker"
+version = "0.1.0"
+description = "Laptop worker: transcribes lesson/meeting audio from a private GitHub repo and writes notes with Claude Code"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+  "faster-whisper>=1.1,<2",
+  "av>=14,<18",
+  "sherpa-onnx>=1.12,<2",
+  "sherpa-onnx-core>=1.12,<2",   # provides libonnxruntime.so; not resolved transitively by uv, import fails without it
+  "numpy>=1.26,<3",
+  "huggingface_hub>=0.25,<2",
+  "jsonschema>=4.20,<5",
+]
+
+[dependency-groups]
+dev = ["pytest>=8,<10"]
+
+[project.scripts]
+lesson-worker = "lesson_worker.cli:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/lesson_worker"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+  "real_whisper: runs the real Whisper model on a FLEURS clip (slow, ~1 min)",
+  "real_claude: calls the real `claude -p` (costs ~0.05 USD)",
+]

@@ -1,0 +1,26 @@
+[Unit]
+Description=Lesson notes worker (transcribe lessons/meetings from the private GitHub repo, write notes with Claude Code)
+# In a *user* manager network-online.target is not a real ordering guarantee; the worker also retries
+# on its own until GitHub is reachable (it never exits just because the network is down).
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+# Absolute paths + explicit environment: a user service does not inherit your shell profile.
+# ~/.local/bin is where `claude` lives and it is NOT on systemd's default PATH.
+Environment=HOME=%h
+Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin
+Environment=PYTHONUNBUFFERED=1
+ExecStart=@WORKER_DIR@/.venv/bin/lesson-worker run
+Restart=on-failure
+RestartSec=30
+# SIGTERM = finish the current unit of work (one audio part / one claude call) and exit; killing is safe anyway.
+TimeoutStopSec=300
+# Whisper is CPU heavy: stay out of the way of interactive use.
+Nice=10
+IOSchedulingClass=idle
+CPUSchedulingPolicy=batch
+
+[Install]
+WantedBy=default.target

@@ -1,0 +1,70 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://lesson-notes.invalid/schemas/settings.schema.json",
+  "title": "App settings (settings/app.json, PWA-written)",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "updated_at": {
+      "type": "string",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?Z$"
+    },
+    "default_language": {
+      "type": "string",
+      "pattern": "^[a-z]{2,3}$",
+      "default": "cs"
+    },
+    "default_notebook_id": {
+      "type": "string",
+      "pattern": "^[0-9A-HJKMNP-TV-Z]{26}$"
+    },
+    "failed_audio_retention_days": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 90,
+      "default": 14
+    },
+    "part_target_bytes": {
+      "type": "integer",
+      "minimum": 1000000,
+      "maximum": 90000000,
+      "default": 20971520
+    },
+    "inbox_warn_bytes": {
+      "type": "integer",
+      "default": 524288000
+    },
+    "inbox_block_bytes": {
+      "type": "integer",
+      "default": 943718400
+    },
+    "diarize_default": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "lesson",
+        "meeting"
+      ],
+      "properties": {
+        "lesson": {
+          "type": "boolean"
+        },
+        "meeting": {
+          "type": "boolean"
+        }
+      }
+    }
+  },
+  "required": [
+    "schema_version",
+    "updated_at",
+    "default_language",
+    "default_notebook_id",
+    "failed_audio_retention_days",
+    "part_target_bytes",
+    "diarize_default"
+  ]
+}

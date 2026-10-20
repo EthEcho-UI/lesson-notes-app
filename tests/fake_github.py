@@ -7,6 +7,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs, unquote
 
 TOKEN = "test-token"
+TOKEN_OVERRIDE = None
 REPO = "EthEcho-UI/lesson-notes-data"
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -106,7 +107,7 @@ class Api(BaseHTTPRequestHandler):
         u = urlparse(self.path); path = unquote(u.path); q = parse_qs(u.query)
         body = self.body() if self.command in ("POST", "PUT", "PATCH", "DELETE") else {}
         with ST.lock: ST.log.append([self.command, path + ("?" + u.query if u.query else "")])
-        if self.headers.get("Authorization") != f"Bearer {TOKEN}":
+        if self.headers.get("Authorization") != f"Bearer {TOKEN_OVERRIDE or TOKEN}":
             return self.out(401, {"message": "Bad credentials"})
         f = self.fault(self.command, path)
         if f:

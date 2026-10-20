@@ -367,6 +367,33 @@ export function searchView(root) {
   return { update: () => run(inp.value) };
 }
 
+// ---- unlock ------------------------------------------------------------------------------------------------------
+let failedUnlocks = 0, lockedUntil = 0;
+export function unlockView(root, ctx) {
+  const msg = h('p', { class: 'conn bad', id: 'unlockMsg', role: 'alert' });
+  const inp = h('input', { type: 'password', class: 'inp', id: 'unlockIn', autocomplete: 'current-password', 'aria-label': t('passphrase') });
+  const go2 = h('button', { type: 'submit', class: 'btn primary big', id: 'unlockBtn' }, t('unlockBtn'));
+  const tickWait = () => {
+    const left = Math.ceil((lockedUntil - Date.now()) / 1000);
+    go2.disabled = left > 0;
+    if (left > 0) { msg.textContent = t('waitS', { s: left }); setTimeout(tickWait, 500); } else if (failedUnlocks) msg.textContent = t('wrongPass');
+  };
+  const form = h('form', { class: 'form unlock', onsubmit: async (e) => {
+    e.preventDefault();
+    if (Date.now() < lockedUntil || !inp.value) return;
+    go2.disabled = true;
+    try { await ctx.unlock(inp.value); failedUnlocks = 0; } catch {
+      failedUnlocks++; lockedUntil = Date.now() + Math.min(30000, 1000 * 2 ** (failedUnlocks - 1)); inp.value = ''; tickWait(); inp.focus();
+    }
+  } },
+  h('h1', null, t('unlockTitle')), h('p', { class: 'muted' }, t('unlockHint')), h('label', { class: 'lbl' }, t('passphrase'), inp), go2, msg,
+  h('button', { type: 'button', class: 'btn ghost danger sm', id: 'forgotBtn', onclick: async () => { if (await confirmDialog(t('forgot') + '?', t('delete'))) ctx.removeToken(); } }, t('forgot')));
+  root.append(form);
+  tickWait();
+  setTimeout(() => inp.focus(), 0);
+  return { update() {} };
+}
+
 // ---- settings ----------------------------------------------------------------------------------------------------------
 let msg = null;
 export function settingsView(root, ctx) {
@@ -374,8 +401,25 @@ export function settingsView(root, ctx) {
     clear(root);
     const tokenIn = h('input', { type: 'password', class: 'inp', id: 'tokenIn', autocomplete: 'off', spellcheck: 'false', placeholder: t('tokenPh'), value: M.cfg.token });
     const repoIn = h('input', { type: 'text', class: 'inp', id: 'repoIn', autocomplete: 'off', spellcheck: 'false', value: M.cfg.repo });
+    const passIn = h('input', { type: 'password', class: 'inp', id: 'passIn', autocomplete: 'new-password' });
+    const passIn2 = h('input', { type: 'password', class: 'inp', id: 'passIn2', autocomplete: 'new-password' });
+    const plainChk = h('input', { type: 'checkbox', id: 'plainChk', checked: !!(M.vault && M.vault.mode === 'plain') });
     const status = h('p', { class: `conn ${msg ? msg.kind : ''}`, id: 'connMsg', role: 'status' }, msg ? msg.text : '');
-    const saveCfg = async () => { await ctx.saveConfig({ token: tokenIn.value.trim(), repo: repoIn.value.trim() }); };
+    const fail = (text) => { msg = { kind: 'bad', text }; status.className = 'conn bad'; status.textContent = text; return false; }; // no re-render: keep what the user typed
+    async function save() {
+      const token = tokenIn.value.trim(), repo = repoIn.value.trim();
+      if (!token) return fail(t('needToken2'));
+      if (token === M.cfg.token && M.vault) { await ctx.saveConfig({ repo }); msg = { kind: 'ok', text: t('tokenSaved') }; render(); return true; }
+      if (plainChk.checked) {
+        if (!(await confirmDialog(t('plainWarn'), t('plainOk')))) return false;
+        await ctx.saveConfig({ repo }); await ctx.saveToken(token, 'plain'); msg = { kind: 'ok', text: t('savedPlain') };
+      } else {
+        if (passIn.value.length < 8) return fail(t('passShort'));
+        if (passIn.value !== passIn2.value) return fail(t('passMismatch'));
+        await ctx.saveConfig({ repo }); await ctx.saveToken(token, 'locked', passIn.value); msg = { kind: 'ok', text: t('savedLocked') };
+      }
+      render(); sync.refresh(); out.kick(); return true;
+    }
     const lp = model.laptopState();
     const lang = h('select', { class: 'inp', id: 'langSel', onchange: (e) => ctx.saveConfig({ lang: e.target.value }) }, h('option', { value: 'cs', selected: M.cfg.lang === 'cs' }, 'Čeština'), h('option', { value: 'en', selected: M.cfg.lang === 'en' }, 'English'));
     const theme = h('select', { class: 'inp', id: 'themeSel', onchange: (e) => ctx.saveConfig({ theme: e.target.value }) }, [['auto', 'themeAuto'], ['light', 'themeLight'], ['dark', 'themeDark']].map(([v, l]) => h('option', { value: v, selected: M.cfg.theme === v }, t(l))));
@@ -384,10 +428,12 @@ export function settingsView(root, ctx) {
     root.append(pageHead(t('settings')), banners(), h('div', { class: 'form' },
       h('label', { class: 'lbl' }, t('token'), tokenIn, h('small', { class: 'muted' }, t('tokenHint'))),
       h('label', { class: 'lbl' }, t('repo'), repoIn),
+      h('label', { class: 'lbl' }, t('passphrase'), passIn), h('label', { class: 'lbl' }, t('passphraseConfirm'), passIn2, h('small', { class: 'muted' }, t('passHint'))),
+      h('label', { class: 'chk' }, plainChk, h('span', null, t('plainMode'))),
       h('div', { class: 'row' },
-        btn(t('saveToken'), async () => { await saveCfg(); msg = { kind: 'ok', text: t('tokenSaved') }; render(); sync.refresh(); out.kick(); }, { cls: 'primary', attrs: { id: 'saveTokenBtn' } }),
+        btn(t('saveToken'), save, { cls: 'primary', attrs: { id: 'saveTokenBtn' } }),
         btn(t('testConn'), async () => {
-          await saveCfg(); msg = { kind: '', text: t('testing') }; render();
+          await ctx.saveConfig({ token: tokenIn.value.trim() || M.cfg.token, repo: repoIn.value.trim() }); msg = { kind: '', text: t('testing') }; render();
           try {
             const info = await gh.repoInfo();
             const tip = await gh.getRef('main');
@@ -396,8 +442,10 @@ export function settingsView(root, ctx) {
           } catch (e) { msg = { kind: 'bad', text: t('connFail', { msg: e.message }) }; }
           render();
         }, { attrs: { id: 'testBtn' } }),
-        M.cfg.token ? btn(t('removeToken'), async () => { await ctx.saveConfig({ token: '' }); msg = null; render(); }, { cls: 'ghost danger sm', attrs: { id: 'rmTokenBtn' } }) : null),
+        M.vault && M.vault.mode === 'locked' ? btn(t('lockNow'), () => ctx.lockNow(), { cls: 'ghost sm', attrs: { id: 'lockBtn' } }) : null,
+        M.vault || M.cfg.token ? btn(t('removeToken'), async () => { await ctx.removeToken(); msg = null; render(); }, { cls: 'ghost danger sm', attrs: { id: 'rmTokenBtn' } }) : null),
       status,
+      h('section', { class: 'blk riskbox' }, h('h2', null, t('riskTitle')), h('p', null, t('riskText'))),
       h('details', { class: 'howto' }, h('summary', null, t('howToken')), h('ol', null, t('tokenSteps').map((s) => h('li', null, s)))),
       h('label', { class: 'lbl' }, t('uiLanguage'), lang), h('label', { class: 'lbl' }, t('theme'), theme),
       h('fieldset', { class: 'fs' }, h('legend', null, t('diarizeDefault')), dcb('lesson'), dcb('meeting')),

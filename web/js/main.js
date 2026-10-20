@@ -9,20 +9,46 @@ import { kick } from './outbox.js';
 import { recoverRecordings } from './recorder.js';
 import * as views from './views.js';
 import * as out from './outbox.js';
+import * as vault from './vault.js';
 
 const LS = 'lessonnotes.';
 const view = document.getElementById('view');
 let current = null;
 
+const persistCfg = () => { const { token, ...rest } = M.cfg; return store.kvSet('cfg', rest); }; // the token is NEVER part of cfg
+
 const ctx = {
+  // patch.token only changes the in-memory token; persisting it goes through saveToken()
   async saveConfig(patch) {
     Object.assign(M.cfg, patch);
-    await store.kvSet('cfg', M.cfg);
+    await persistCfg();
     try { localStorage.setItem(LS + 'lang', M.cfg.lang); localStorage.setItem(LS + 'theme', M.cfg.theme); } catch { /* storage blocked */ }
     gh.configure({ token: M.cfg.token, repo: M.cfg.repo });
     applyLook();
     if ('token' in patch) { M.net.auth = false; M.net.error = null; }
     emit(); mountRoute();
+  },
+  // mode: 'locked' (passphrase) | 'plain'
+  async saveToken(token, mode, pass) {
+    const v = mode === 'plain' ? vault.plainVault(token) : await vault.seal(token, pass);
+    await vault.save(v);
+    M.vault = { mode: v.mode }; M.locked = false;
+    await ctx.saveConfig({ token });
+  },
+  async lockNow() {
+    M.cfg.token = ''; gh.configure({ token: '' });
+    const v = await vault.load(); M.locked = !!(v && v.mode === 'locked');
+    emit(); mountRoute();
+  },
+  async removeToken() {
+    await vault.remove(); M.vault = null; M.locked = false;
+    await ctx.saveConfig({ token: '' });
+  },
+  async unlock(pass) {
+    const v = await vault.load();
+    const token = await vault.open(v, pass); // throws on wrong passphrase
+    M.locked = false; await ctx.saveConfig({ token });
+    refresh().then(() => kick()); kick();
   },
   async setDiarize(kind, value) {
     M.cfg.diarize = { ...M.cfg.diarize, [kind]: value };
@@ -72,6 +98,7 @@ function route() {
 }
 function mountRoute() {
   clear(view);
+  if (M.locked) { current = views.unlockView(view, ctx) || {}; renderNav(); return; }
   const [fn, args] = route();
   current = fn(view, args) || {};
   renderNav();
@@ -89,7 +116,10 @@ function netDot() {
 async function boot() {
   try { M.cfg.lang = localStorage.getItem(LS + 'lang') || M.cfg.lang; M.cfg.theme = localStorage.getItem(LS + 'theme') || M.cfg.theme; } catch { /* ignore */ }
   const saved = await store.kvGet('cfg');
-  if (saved) Object.assign(M.cfg, saved);
+  if (saved) { const { token: _legacy, ...rest } = saved; Object.assign(M.cfg, rest); if (_legacy !== undefined) await persistCfg(); } // drop any token that an early build left in cfg
+  const v = await vault.load();
+  M.vault = v ? { mode: v.mode } : null;
+  if (v && v.mode === 'plain') M.cfg.token = v.token; else if (v) M.locked = true;
   M.net.lastSync = await store.kvGet('lastSync');
   let backoff = 1;
   try { const b = Number(localStorage.getItem(LS + 'backoff')); if (b > 0) backoff = b; } catch { /* ignore */ }

@@ -1,4 +1,4 @@
-// DOM helpers. All text goes through textContent / text nodes, never innerHTML (data is untrusted).
+// DOM helpers. All text goes through textContent and text nodes (never parsed as HTML), because repo data is untrusted.
 import { t } from './i18n.js';
 
 export function h(tag, attrs, ...kids) {

@@ -11,6 +11,7 @@ export const M = {
   cfg: { token: '', repo: 'EthEcho-UI/lesson-notes-data', lang: 'cs', theme: 'auto', diarize: { lesson: false, meeting: true } },
   net: { online: true, lastSync: null, error: null, auth: false, syncing: false },
   version: 0,
+  locked: false, vault: null,
 };
 const listeners = new Set();
 export const onChange = (fn) => { listeners.add(fn); return () => listeners.delete(fn); };

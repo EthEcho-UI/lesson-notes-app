@@ -60,11 +60,37 @@ class Ctx:
         return self.page.evaluate(expr, arg) if arg is not None else self.page.evaluate(expr)
     def close(self): self.browser.close()
 
-def login(c, token=TOKEN):
+def login(c, token=TOKEN, plain=True, passphrase="correct horse battery"):
+    """plain=True uses the explicit 'no passphrase' mode so tests can reload freely; test_vault covers the locked default."""
     p = c.page
     p.goto(BASE + "#/settings")
-    p.fill("#tokenIn", token); p.click("#saveTokenBtn")
-    wait_for(lambda: "Ulo" in p.inner_text("#connMsg"), 5, "token saved")
+    p.fill("#tokenIn", token)
+    if plain:
+        p.check("#plainChk"); p.click("#saveTokenBtn"); p.click("dialog .btn.danger")
+    else:
+        p.fill("#passIn", passphrase); p.fill("#passIn2", passphrase); p.click("#saveTokenBtn")
+    wait_for(lambda: "Uloženo" in p.inner_text("#connMsg"), 8, "token saved")
+
+SCAN_JS = """async (needle) => {
+  const hits = [];
+  const has = (v) => { try { return JSON.stringify(v).includes(needle); } catch (e) { return false; } };
+  try { for (let i = 0; i < localStorage.length; i++) { const k = localStorage.key(i); if (k.includes(needle) || (localStorage.getItem(k) || '').includes(needle)) hits.push('localStorage:' + k); } } catch (e) {}
+  try { for (let i = 0; i < sessionStorage.length; i++) { const k = sessionStorage.key(i); if ((sessionStorage.getItem(k) || '').includes(needle)) hits.push('sessionStorage:' + k); } } catch (e) {}
+  for (const d of await indexedDB.databases()) {
+    const db = await new Promise((res, rej) => { const q = indexedDB.open(d.name); q.onsuccess = () => res(q.result); q.onerror = () => rej(q.error); });
+    for (const name of db.objectStoreNames) {
+      const rows = await new Promise((res) => { const g = db.transaction(name).objectStore(name).getAll(); g.onsuccess = () => res(g.result); g.onerror = () => res([]); });
+      for (const r of rows) {
+        if (has(r)) hits.push('idb:' + d.name + '/' + name);
+        if (r && r.blob instanceof Blob && r.blob.size < 2e6 && (await r.blob.text()).includes(needle)) hits.push('idb-blob:' + name);
+      }
+    }
+    db.close();
+  }
+  for (const k of await caches.keys()) { const c = await caches.open(k); for (const req of await c.keys()) { if (req.url.includes(needle)) hits.push('cache-url:' + k); const t = await (await c.match(req)).text(); if (t.includes(needle)) hits.push('cache:' + k + ':' + req.url); } }
+  return hits;
+}"""
+def scan_token(c, needle=TOKEN): return c.page.evaluate(SCAN_JS, needle)
 
 def create_notebook(c, name):
     p = c.page; p.goto(BASE + "#/")
@@ -121,8 +147,8 @@ def heartbeat(offline_minutes=0, jobs=0):
     ctl("put", {"branch": "main", "files": {"worker/heartbeat.json": json.dumps(d)}})
 
 def sync_now(c):
-    c.page.goto(BASE + "#/settings"); c.page.click("#syncBtn")
-    time.sleep(0.8)
+    c.page.goto(BASE + "#/settings"); time.sleep(1.5)   # let any in-flight refresh finish, otherwise the click coalesces with it
+    c.page.click("#syncBtn"); time.sleep(1.0)
 
 def check_upload_contract(note_id, n_parts):
     note = json.loads(main_files()[f"notes/{note_id}/note.json"])
@@ -333,6 +359,61 @@ def test_sw_isolation_and_shell(pw):
         c.context.set_offline(True); p.reload(); wait_for(lambda: p.locator("#nav a").count() == 4, 8, "shell loads offline"); c.context.set_offline(False)
         assert not c.problems, c.problems
     finally: c.close()
+
+def test_vault_locked_token(pw):
+    # the real token is long and random-looking; use a distinctive one so a scan cannot false-positive
+    secret = "github_pat_TESTSECRET_0123456789abcdefABCDEF"
+    ctl("reset")
+    fg.TOKEN_OVERRIDE = secret
+    c = Ctx(pw); p = c.page
+    try:
+        # sanity: the scanner really finds a plainly stored token
+        login(c, token=secret, plain=True)
+        assert scan_token(c, secret), "scanner must find the token in plain mode (otherwise the locked-mode check is meaningless)"
+        p.click("#rmTokenBtn"); time.sleep(0.5)
+        assert not scan_token(c, secret), "removing the token must erase it"
+        # locked (default): nothing readable at rest
+        p.fill("#tokenIn", secret); p.fill("#passIn", "short"); p.fill("#passIn2", "short"); p.click("#saveTokenBtn")
+        wait_for(lambda: "8 znaků" in p.inner_text("#connMsg"), 5, "short passphrase rejected")
+        p.fill("#passIn", "correct horse battery"); p.fill("#passIn2", "other thing entirely"); p.click("#saveTokenBtn")
+        wait_for(lambda: "neshodují" in p.inner_text("#connMsg"), 5, "mismatch rejected")
+        p.fill("#passIn", "correct horse battery"); p.fill("#passIn2", "correct horse battery"); p.click("#saveTokenBtn")
+        wait_for(lambda: "zamčeno" in p.inner_text("#connMsg"), 15, "saved locked")
+        assert scan_token(c, secret) == [], scan_token(c, secret)
+        vault = p.evaluate("""() => new Promise(r => { const q = indexedDB.open('lessonnotes'); q.onsuccess = () => { const g = q.result.transaction('kv').objectStore('kv').get('vault'); g.onsuccess = () => r(g.result.v); }; })""")
+        assert vault["mode"] == "locked" and vault["kdf"] == "PBKDF2-SHA256" and vault["iter"] >= 600000 and {"salt", "iv", "ct"} <= set(vault) and "token" not in vault, vault
+        cfg = p.evaluate("""() => new Promise(r => { const q = indexedDB.open('lessonnotes'); q.onsuccess = () => { const g = q.result.transaction('kv').objectStore('kv').get('cfg'); g.onsuccess = () => r(g.result.v); }; })""")
+        assert "token" not in cfg, cfg
+        create_notebook(c, "Zamčeno")
+        # reload -> unlock screen, nothing works before unlocking
+        p.reload(); wait_for(lambda: p.locator("#unlockIn").count() == 1, 10, "unlock screen")
+        assert "Zamčeno" not in p.inner_text("main")
+        p.fill("#unlockIn", "wrong passphrase"); p.click("#unlockBtn")
+        wait_for(lambda: "Špatné heslo" in p.inner_text("#unlockMsg") or "Počkej" in p.inner_text("#unlockMsg"), 10, "wrong passphrase rejected")
+        assert p.locator("#unlockIn").count() == 1, "must stay locked"
+        assert p.locator("#unlockBtn").is_disabled(), "retry backoff after a wrong passphrase"
+        time.sleep(1.3)
+        p.fill("#unlockIn", "correct horse battery"); p.click("#unlockBtn")
+        wait_for(lambda: p.locator("#unlockIn").count() == 0 and "Zamčeno" in p.inner_text("main"), 15, "unlocked, app visible")
+        # unlocked session works against the API and still nothing readable at rest
+        sync_now(c); create_notebook(c, "Po odemčení")
+        wait_for(lambda: any("notebooks/" in k for k in main_files()), 10, "write works after unlock")
+        assert scan_token(c, secret) == [], scan_token(c, secret)
+        # lock now
+        p.goto(BASE + "#/settings"); p.click("#lockBtn"); wait_for(lambda: p.locator("#unlockIn").count() == 1, 5, "locked again")
+        assert not c.problems, c.problems
+    finally:
+        fg.TOKEN_OVERRIDE = None; c.close()
+
+def test_csp(pw):
+    html = (REPO / "web" / "index.html").read_text()
+    csp = re.search(r'Content-Security-Policy" content="([^"]+)"', html).group(1)
+    assert "unsafe-" not in csp, csp
+    assert "connect-src https://api.github.com;" in csp and "script-src 'self'" in csp and "default-src 'none'" in csp
+    for f in (REPO / "web").rglob("*.js"):
+        src = f.read_text(); assert not re.search(r"\binnerHTML\b|\beval\(|new Function\(|\.outerHTML\s*=|insertAdjacentHTML", src), f"unsafe DOM/eval API in {f}"
+    assert not re.search(r"\son[a-z]+=|style=", html)
+
 
 def test_precache_static(pw):
     out = subprocess.run([sys.executable, str(REPO / "tools" / "stamp-precache.py"), "--check"], cwd=REPO, capture_output=True, text=True)

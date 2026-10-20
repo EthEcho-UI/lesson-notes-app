@@ -1,4 +1,4 @@
-import { h, clear, btn, iconBtn, icon, toast, promptDialog, confirmDialog } from './ui.js';
+import { h, clear, btn, iconBtn, icon, toast, promptDialog, confirmDialog, dialog } from './ui.js';
 import { t, getLang, labels } from './i18n.js';
 import * as model from './model.js';
 import { M, onChange } from './model.js';
@@ -301,13 +301,37 @@ export function noteView(root, { id }) {
       p.segments.map((s) => h('p', { class: 'seg-row' }, h('span', { class: 'ts' }, fmtDuration(s.start)),
         s.speaker ? h('button', { type: 'button', class: 'spk', onclick: () => renameSpeaker(n, p.part_id, s.speaker) }, model.speakerName(n, p.part_id, s.speaker)) : null, ' ', s.text)))));
   }
-  async function renameSpeaker(n, partId, label) {
-    const cur = model.speakerName(n, partId, label);
-    const r = await promptDialog({ title: t('renameSpeaker'), label: t('speakerName'), value: cur, checkbox: { label: t('applyAllParts'), checked: false } });
+  async function renameSpeaker(n, partId, rawLabel) {
+    const label = model.canonSpeaker(n, partId, rawLabel);
+    const cur = model.speakerName(n, partId, rawLabel);
+    const others = model.speakersInPart(n, partId).filter((l) => l !== label);
+    const mergedIn = Object.entries((n.speakers && n.speakers.merges) || {}).some(([k, v]) => v === label && k.startsWith(partId + ':'));
+    const r = await dialog((d, close) => {
+      const input = h('input', { type: 'text', value: cur, class: 'inp', id: 'spkName', 'aria-label': t('speakerName'), maxlength: 100 });
+      const cb = h('input', { type: 'checkbox', id: 'spkAll' });
+      const sel = others.length ? h('select', { class: 'inp', id: 'spkMerge', 'aria-label': t('mergeInto') },
+        h('option', { value: '' }, t('mergeNone')), others.map((l) => h('option', { value: l }, model.speakerName(n, partId, l)))) : null;
+      d.append(h('form', { onsubmit: (e) => { e.preventDefault(); const v = input.value.trim(); if (v || (sel && sel.value)) close({ value: v, all: cb.checked, merge: sel ? sel.value : '' }); } },
+        h('h2', null, t('renameSpeaker')), h('label', { class: 'lbl' }, t('speakerName'), input),
+        sel ? h('label', { class: 'lbl' }, t('mergeInto'), sel) : null,
+        h('label', { class: 'chk' }, cb, h('span', null, t('applyAllParts'))),
+        mergedIn ? btn(t('unmerge'), () => close({ unmerge: true, all: cb.checked }), { cls: 'ghost sm', attrs: { id: 'spkUnmerge' } }) : null,
+        h('div', { class: 'row end' }, btn(t('cancel'), () => close(null), { cls: 'ghost' }), h('button', { type: 'submit', class: 'btn primary', id: 'spkSave' }, t('save')))));
+      setTimeout(() => { input.focus(); input.select(); }, 0);
+    });
     if (!r) return;
     const names = { ...((n.speakers && n.speakers.names) || {}) };
-    if (r.checked) { for (const p of n.transcript.parts) if (p.segments.some((s) => s.speaker === label)) names[`${p.part_id}:${label}`] = r.value; } else names[`${partId}:${label}`] = r.value;
-    await out.writeJson(`notes/${id}/speakers.json`, { create: { schema_version: 1, note_id: id, updated_at: new Date().toISOString().replace(/\.\d+Z$/, 'Z'), names: {} }, set: { names } });
+    const merges = { ...((n.speakers && n.speakers.merges) || {}) };
+    const parts = r.all ? n.transcript.parts.filter((p) => model.speakersInPart(n, p.part_id).includes(label)) : n.transcript.parts.filter((p) => p.part_id === partId);
+    for (const p of parts) {
+      if (r.unmerge) { for (const [k, v] of Object.entries(merges)) if (v === label && k.startsWith(p.part_id + ':')) delete merges[k]; }
+      else if (r.merge) {
+        if (!model.speakersInPart(n, p.part_id).includes(r.merge)) continue; // target speaker absent in that part
+        for (const [k, v] of Object.entries(merges)) if (v === label && k.startsWith(p.part_id + ':')) merges[k] = r.merge; // re-point earlier merges
+        for (const s of p.segments) if (s.speaker && model.canonSpeaker(n, p.part_id, s.speaker) === label) merges[`${p.part_id}:${s.speaker}`] = r.merge;
+      } else names[`${p.part_id}:${label}`] = r.value;
+    }
+    await out.writeJson(`notes/${id}/speakers.json`, { create: { schema_version: 1, note_id: id, updated_at: new Date().toISOString().replace(/\.\d+Z$/, 'Z'), names: {}, merges: {} }, set: { names, merges } });
   }
   function audioTab(n, d) {
     const st = n.status;
@@ -409,7 +433,9 @@ export function settingsView(root, ctx) {
     async function save() {
       const token = tokenIn.value.trim(), repo = repoIn.value.trim();
       if (!token) return fail(t('needToken2'));
-      if (token === M.cfg.token && M.vault) { await ctx.saveConfig({ repo }); msg = { kind: 'ok', text: t('tokenSaved') }; render(); return true; }
+      const wantMode = plainChk.checked ? 'plain' : 'locked';
+      // Early return only when nothing security-relevant changed: same token, same mode, no new passphrase.
+      if (token === M.cfg.token && M.vault && M.vault.mode === wantMode && !(wantMode === 'locked' && passIn.value)) { await ctx.saveConfig({ repo }); msg = { kind: 'ok', text: t('tokenSaved') }; render(); return true; }
       if (plainChk.checked) {
         if (!(await confirmDialog(t('plainWarn'), t('plainOk')))) return false;
         await ctx.saveConfig({ repo }); await ctx.saveToken(token, 'plain'); msg = { kind: 'ok', text: t('savedPlain') };

@@ -15,7 +15,8 @@ const LS = 'lessonnotes.';
 const view = document.getElementById('view');
 let current = null;
 
-const persistCfg = () => { const { token, ...rest } = M.cfg; return store.kvSet('cfg', rest); }; // the token is NEVER part of cfg
+// The ONLY writer of the persisted cfg record. The token is NEVER part of it (it lives in the vault only).
+const persistCfg = () => { const { token, ...rest } = M.cfg; return store.kvSet('cfg', rest); };
 
 const ctx = {
   // patch.token only changes the in-memory token; persisting it goes through saveToken()
@@ -52,7 +53,7 @@ const ctx = {
   },
   async setDiarize(kind, value) {
     M.cfg.diarize = { ...M.cfg.diarize, [kind]: value };
-    await store.kvSet('cfg', M.cfg);
+    await persistCfg();
     const nbs = model.notebooks(true);
     if (nbs.length) {
       const ts = new Date().toISOString().replace(/\.\d+Z$/, 'Z');

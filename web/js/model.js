@@ -206,7 +206,25 @@ export function toMarkdown(n, labels, withTranscript = false, fmtTime = (s) => S
   }
   return lines.join('\n').replace(/\n{3,}/g, '\n\n').trimEnd() + '\n';
 }
+// speakers.json (PWA-owned, single writer): names {"<part>:<label>"|"*:<label>": name}, merges {"<part>:<label>": "<target label>"}
+export function canonSpeaker(n, partId, label) {
+  const mg = (n.speakers && n.speakers.merges) || {};
+  for (let i = 0; i < 10; i++) {
+    const nx = mg[`${partId}:${label}`] || mg[`*:${label}`];
+    if (!nx || nx === label) break;
+    label = nx;
+  }
+  return label;
+}
 export function speakerName(n, partId, label) {
   const names = (n.speakers && n.speakers.names) || {};
-  return names[`${partId}:${label}`] || names[`*:${label}`] || label;
+  const c = canonSpeaker(n, partId, label);
+  return names[`${partId}:${c}`] || names[`*:${c}`] || c;
+}
+// distinct canonical speaker labels of one transcript part
+export function speakersInPart(n, partId) {
+  const part = n.transcript && n.transcript.parts.find((p) => p.part_id === partId);
+  const set = new Set();
+  if (part) for (const s of part.segments) if (s.speaker) set.add(canonSpeaker(n, partId, s.speaker));
+  return [...set];
 }

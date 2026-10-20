@@ -405,6 +405,109 @@ def test_vault_locked_token(pw):
     finally:
         fg.TOKEN_OVERRIDE = None; c.close()
 
+
+IDB_KV = """(k) => new Promise(r => { const q = indexedDB.open('lessonnotes'); q.onsuccess = () => { const g = q.result.transaction('kv').objectStore('kv').get(k); g.onsuccess = () => { r(g.result ? g.result.v : null); q.result.close(); }; }; })"""
+def kv(c, k): return c.page.evaluate(IDB_KV, k)
+SECRET = "github_pat_TESTSECRET_0123456789abcdefABCDEF"
+def unlock(c, passphrase):
+    p = c.page
+    wait_for(lambda: p.locator("#unlockIn").count() == 1, 10, "unlock screen")
+    p.fill("#unlockIn", passphrase); p.click("#unlockBtn")
+    wait_for(lambda: p.locator("#unlockIn").count() == 0, 15, "unlocked")
+def save_locked(c, passphrase):
+    p = c.page
+    p.fill("#passIn", passphrase); p.fill("#passIn2", passphrase); p.click("#saveTokenBtn")
+
+def test_cfg_never_persists_token(pw):
+    """Regression (errors.md finding 1): changing settings while UNLOCKED must not write the token anywhere at rest."""
+    ctl("reset"); fg.TOKEN_OVERRIDE = SECRET
+    c = Ctx(pw); p = c.page
+    try:
+        login(c, token=SECRET, plain=False)
+        wait_for(lambda: (kv(c, "vault") or {}).get("mode") == "locked", 15, "locked vault saved")
+        create_notebook(c, "Cfg")                       # settings/app.json can only be written once a notebook exists
+        p.reload(); unlock(c, "correct horse battery")  # fresh session: token only in memory
+        p.goto(BASE + "#/settings")
+        p.click("#dz-lesson"); p.click("#dz-meeting")   # setDiarize -> persisted cfg + settings/app.json
+        p.select_option("#langSel", "en"); p.select_option("#themeSel", "dark")
+        wait_for(lambda: "settings/app.json" in main_files(), 10, "settings written")
+        wait_for(lambda: json.loads(main_files()["settings/app.json"])["diarize_default"]["lesson"] is True, 10, "diarize change synced")
+        time.sleep(1.0)
+        cfg = kv(c, "cfg"); assert cfg and "token" not in cfg and cfg.get("diarize"), cfg
+        assert cfg["diarize"]["lesson"] is True, cfg
+        assert scan_token(c, SECRET) == [], scan_token(c, SECRET)
+        assert not any(SECRET in v for v in main_files().values()), "token must never reach the data repo"
+        assert not c.problems, c.problems
+    finally:
+        fg.TOKEN_OVERRIDE = None; c.close()
+
+def test_vault_mode_switch(pw):
+    """Regression (errors.md finding 2): locked -> plain -> locked and passphrase change must reseal, not early-return."""
+    ctl("reset"); fg.TOKEN_OVERRIDE = SECRET
+    c = Ctx(pw); p = c.page
+    try:
+        login(c, token=SECRET, plain=False, passphrase="first passphrase")
+        wait_for(lambda: (kv(c, "vault") or {}).get("mode") == "locked", 15, "locked")
+        v1 = kv(c, "vault"); assert scan_token(c, SECRET) == []
+        # locked -> plain (same token, nothing else changed)
+        p.goto(BASE + "#/settings"); p.check("#plainChk"); p.click("#saveTokenBtn"); p.click("dialog .btn.danger")
+        wait_for(lambda: (kv(c, "vault") or {}).get("mode") == "plain", 10, "switched to plain")
+        assert scan_token(c, SECRET), "plain mode stores the token (by explicit choice)"
+        # plain -> locked
+        p.goto(BASE + "#/settings"); p.uncheck("#plainChk"); save_locked(c, "second passphrase")
+        wait_for(lambda: (kv(c, "vault") or {}).get("mode") == "locked", 10, "switched back to locked")
+        assert scan_token(c, SECRET) == [], scan_token(c, SECRET)
+        v2 = kv(c, "vault"); assert v2["ct"] != v1["ct"]
+        # passphrase change with the SAME token and mode
+        p.goto(BASE + "#/settings"); save_locked(c, "third passphrase")
+        wait_for(lambda: (kv(c, "vault") or {}).get("ct") not in (None, v2["ct"]), 10, "resealed with the new passphrase")
+        assert scan_token(c, SECRET) == []
+        # a click on Save with nothing changed keeps the vault as-is (early return still works)
+        v3 = kv(c, "vault"); p.goto(BASE + "#/settings"); p.click("#saveTokenBtn"); time.sleep(1.0)
+        assert kv(c, "vault")["ct"] == v3["ct"]
+        # reload: old passphrases fail, the new one works
+        p.reload(); wait_for(lambda: p.locator("#unlockIn").count() == 1, 10, "unlock screen")
+        for old in ("first passphrase", "second passphrase"):
+            p.fill("#unlockIn", old); p.click("#unlockBtn")
+            wait_for(lambda: p.locator("#unlockBtn").is_disabled(), 5, "backoff after wrong passphrase"); time.sleep(2.2)
+            assert p.locator("#unlockIn").count() == 1
+        unlock(c, "third passphrase")
+        assert scan_token(c, SECRET) == []
+        assert not c.problems, c.problems
+    finally:
+        fg.TOKEN_OVERRIDE = None; c.close()
+
+def test_speaker_merge(pw):
+    c = Ctx(pw); p = c.page
+    try:
+        login(c); create_notebook(c, "Merge"); new_note(c, "Přeštěpení", [audio("a.ogg", 3000, 3), audio("b.ogg", 2000, 5)])
+        nid = wait_for(lambda: note_ids(), 15, "note")[0]; wait_for(lambda: f"jobs/{nid}/job.json" in inbox_files(), 20, "job")
+        sim_worker(nid, "done", speakers=True)
+        p.goto(BASE + f"#/n/{nid}"); sync_now(c); p.goto(BASE + f"#/n/{nid}")
+        wait_for(lambda: "Hotovo" in p.inner_text("#statusCard"), 15, "done"); p.click("#tab-transcript")
+        spk = lambda: p.locator(".spk").all_inner_texts()
+        assert spk() == ["SPEAKER_00", "SPEAKER_01"] * 2, spk()
+        # merge SPEAKER_01 into SPEAKER_00 in ALL parts
+        p.locator(".spk").nth(1).click(); p.select_option("#spkMerge", "SPEAKER_00"); p.check("#spkAll"); p.click("#spkSave")
+        wait_for(lambda: f"notes/{nid}/speakers.json" in main_files(), 10, "speakers.json written")
+        sp = json.loads(main_files()[f"notes/{nid}/speakers.json"])
+        assert sp["merges"] == {"p01:SPEAKER_01": "SPEAKER_00", "p02:SPEAKER_01": "SPEAKER_00"}, sp
+        assert spk() == ["SPEAKER_00"] * 4, spk()
+        # raw transcript untouched (single-writer rule): only the user file changed
+        tr = json.loads(main_files()[f"notes/{nid}/transcript.json"]); assert {s["speaker"] for pt in tr["parts"] for s in pt["segments"]} == {"SPEAKER_00", "SPEAKER_01"}
+        # rename the merged speaker (all parts) and check the Markdown export uses it
+        p.locator(".spk").first.click(); p.fill("#spkName", "Učitel"); p.check("#spkAll"); p.click("#spkSave")
+        wait_for(lambda: spk() == ["Učitel"] * 4, 10, "renamed merged speaker")
+        p.check("#withTr"); p.click("#copyBtn")
+        md = wait_for(lambda: p.evaluate("navigator.clipboard.readText()"), 5, "clipboard")
+        assert "SPEAKER_01" not in md and "**Učitel**" in md, md
+        # undo the merge
+        p.locator(".spk").first.click(); p.check("#spkAll"); p.click("#spkUnmerge")
+        wait_for(lambda: json.loads(main_files()[f"notes/{nid}/speakers.json"])["merges"] == {}, 10, "merge removed")
+        assert spk() == ["Učitel", "SPEAKER_01"] * 2, spk()
+        assert not c.problems, c.problems
+    finally: c.close()
+
 def test_csp(pw):
     html = (REPO / "web" / "index.html").read_text()
     csp = re.search(r'Content-Security-Policy" content="([^"]+)"', html).group(1)

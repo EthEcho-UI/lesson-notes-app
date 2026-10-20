@@ -66,7 +66,8 @@ export function update(store, key, fn) {
 export const clearStore = (store) => run([store], 'readwrite', (tx) => { tx.objectStore(store).clear(); });
 
 export const kvGet = async (k, dflt = null) => { const r = await get('kv', k); return r ? r.v : dflt; };
-export const kvSet = (k, v) => put('kv', { k, v });
+// Defense in depth: the 'cfg' record can never carry a token, whatever the caller passes.
+export const kvSet = (k, v) => put('kv', { k, v: k === 'cfg' && v && typeof v === 'object' ? (({ token, ...rest }) => rest)(v) : v });
 export const kvDel = (k) => del('kv', k);
 
 export function chunksOf(rid) {

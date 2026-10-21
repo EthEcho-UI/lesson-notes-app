@@ -209,3 +209,14 @@ def test_local_audio_job(make_worker, cfg, asr, gh):
     assert st["state"] == "done" and st["audio"]["state"] == "purged"
     assert not (cfg.local_audio_dir / j["note_id"]).exists()      # local audio deleted after done
     assert inbox_files() == []
+
+
+def test_local_cleanup_keeps_parts_of_a_later_job(make_worker, cfg, asr, gh):
+    """The laptop recorder may store the next part of a note while the previous job is still being processed."""
+    j = put_job(location="local", local_dir=cfg.local_audio_dir, durations=(2.0,))
+    later = cfg.local_audio_dir / j["note_id"] / "parts" / "02.opus"
+    later.write_bytes(b"audio of a later job")
+    make_worker().drain()
+    assert main_json(f"notes/{j['note_id']}/status.json")["state"] == "done"
+    assert not (cfg.local_audio_dir / j["note_id"] / "parts" / "01.wav").exists()
+    assert later.read_bytes() == b"audio of a later job"

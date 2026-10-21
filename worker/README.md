@@ -65,7 +65,7 @@ Settings that come from the repo (`settings/app.json`): `failed_audio_retention_
 - **Notes**: `claude -p` runs from an empty temp dir, absolute path, `HOME`+`PATH`+`LANG`+`TERM` only, `--tools ""`, `--setting-sources project`, `--strict-mcp-config`, no session persistence, JSON schema output, timeout, `is_error` check. The transcript is passed between `<prepis>` tags and declared to be data. If Claude is not logged in the job fails with `claude_not_logged_in` and a clear message.
 - **Diarization** is best-effort: if models/onnxruntime are missing or it errors, the transcript is written without speaker labels (logged), the job still succeeds. Labels are `S1`,`S2`.. per part (first appearance order), clusters < 20 s of speech are merged into the nearest one (only for parts > 2 min).
 - **Meetings** (`kind: meeting`) get `decisions[]` and `action_items[{task,owner,due}]`; lessons never do.
-- **Laptop-recorded audio** (`audio_location: local`): the job.json is on inbox, the parts are read from `~/.local/share/lesson-notes/local/<noteId>/parts/NN.ext` and deleted after `done`. (The recorder that writes them is not part of this worker.)
+- **Laptop-recorded audio** (`audio_location: local`): the job.json is on inbox, the parts are read from `~/.local/share/lesson-notes/local/<noteId>/parts/NN.ext` and deleted after `done`. (Written by the laptop recorder, `../recorder`.)
 - One daemon per machine (flock in the cache dir); a second `run` exits with code 2.
 
 ## Uninstall

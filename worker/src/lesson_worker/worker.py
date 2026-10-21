@@ -569,7 +569,15 @@ class Worker:
     def _remove_job_audio(self, job):
         """Remove THIS job's audio from inbox; never touches a newer job.json or files it references. Orphan-recreate only if inbox becomes empty."""
         if job.location == "local":
-            shutil.rmtree(self.cfg.local_audio_dir / job.note_id, ignore_errors=True)
+            # only THIS job's parts: the recorder may already have stored the parts of a later job for the same note
+            base = self.cfg.local_audio_dir / job.note_id
+            for p in job.doc["parts"]:
+                (base / p["file"]).unlink(missing_ok=True)
+            for d in (base / "parts", base):
+                try:
+                    d.rmdir()                    # only if empty
+                except OSError:
+                    pass
         tip1 = self.api.get_ref("inbox")
         if tip1 is None:
             return True

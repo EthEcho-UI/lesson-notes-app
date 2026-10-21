@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Lesson recorder
+Comment=Record a lesson or meeting on this laptop (local UI on 127.0.0.1)
+Exec=@RECORDER@/.venv/bin/lesson-record ui
+Terminal=false
+Categories=AudioVideo;Recorder;
+StartupNotify=false

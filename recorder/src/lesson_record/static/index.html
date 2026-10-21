@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson recorder</title>
+<link rel="stylesheet" href="/app.css">
+</head>
+<body>
+<main>
+  <header>
+    <h1>Lesson recorder</h1>
+    <div id="worker" class="worker" title="State of the lesson-worker on this laptop">worker: ...</div>
+  </header>
+
+  <section id="banner" class="banner" hidden role="alert"></section>
+
+  <section class="card recorder" aria-live="polite">
+    <div class="statusrow"><span id="pill" class="pill idle">idle</span><span id="what" class="what"></span></div>
+    <div id="clock" class="clock" aria-label="elapsed time">0:00:00</div>
+    <div class="meter" role="img" aria-label="input level"><div id="bar" class="bar"></div><div id="peak" class="peakmark"></div></div>
+    <div class="scale"><span>-60 dB</span><span>-30</span><span>0</span></div>
+    <div id="warnings" class="warnings"></div>
+    <div class="buttons">
+      <button id="btn-start" class="big start" type="button">Start</button>
+      <button id="btn-pause" class="big pause" type="button" disabled>Pause</button>
+      <button id="btn-stop" class="big stop" type="button" disabled>Stop</button>
+    </div>
+    <div id="capture" class="capture"></div>
+  </section>
+
+  <section class="card" id="form">
+    <h2>New recording</h2>
+    <div class="row">
+      <label for="existing">Add to</label>
+      <select id="existing"><option value="">a new note</option></select>
+    </div>
+    <div class="row">
+      <label>Kind</label>
+      <div class="seg" role="radiogroup" aria-label="kind">
+        <input type="radio" name="kind" id="kind-lesson" value="lesson" checked><label for="kind-lesson">Lesson (mic)</label>
+        <input type="radio" name="kind" id="kind-meeting" value="meeting"><label for="kind-meeting">Meeting (mic + system audio)</label>
+      </div>
+    </div>
+    <div class="row">
+      <label for="notebook">Notebook</label>
+      <select id="notebook"></select>
+    </div>
+    <div class="row">
+      <label for="title">Title</label>
+      <input id="title" type="text" maxlength="200" autocomplete="off" placeholder="optional, e.g. Mitosis">
+    </div>
+    <p class="hint" id="meetinghint" hidden>Recording other people may require their consent.</p>
+  </section>
+
+  <section class="card">
+    <div class="h2row"><h2>Recent notes</h2><button id="refresh" class="small" type="button">Refresh</button></div>
+    <div id="outbox"></div>
+    <ul id="notes" class="notes"></ul>
+    <p id="notesmsg" class="hint"></p>
+  </section>
+</main>
+<script src="/app.js"></script>
+</body>
+</html>

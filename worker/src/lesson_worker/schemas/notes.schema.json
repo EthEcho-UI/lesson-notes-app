@@ -6,7 +6,10 @@
   "additionalProperties": false,
   "properties": {
     "schema_version": {
-      "const": 1
+      "enum": [
+        1,
+        2
+      ]
     },
     "note_id": {
       "type": "string",
@@ -38,6 +41,140 @@
       }
     },
     "content": {
+      "type": "object"
+    },
+    "language": {
+      "const": "cs",
+      "description": "v2: notes are ALWAYS written in Czech"
+    },
+    "based_on_images": {
+      "type": "array",
+      "maxItems": 12,
+      "items": {
+        "type": "string",
+        "pattern": "^i[0-9]{2}$"
+      },
+      "description": "v2: image ids shown to the model for this generation"
+    }
+  },
+  "required": [
+    "schema_version",
+    "note_id",
+    "kind",
+    "job_id",
+    "generated_at",
+    "model",
+    "based_on_parts",
+    "content"
+  ],
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "schema_version": {
+            "const": 1
+          }
+        },
+        "required": [
+          "schema_version"
+        ]
+      },
+      "then": {
+        "properties": {
+          "content": {
+            "$ref": "#/$defs/content_v1"
+          },
+          "language": false,
+          "based_on_images": false
+        },
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "kind": {
+                  "const": "meeting"
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "content": {
+                  "required": [
+                    "decisions",
+                    "action_items"
+                  ]
+                }
+              }
+            },
+            "else": {
+              "properties": {
+                "content": {
+                  "properties": {
+                    "decisions": false,
+                    "action_items": false
+                  }
+                }
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "schema_version": {
+            "const": 2
+          },
+          "kind": {
+            "const": "lesson"
+          }
+        },
+        "required": [
+          "schema_version",
+          "kind"
+        ]
+      },
+      "then": {
+        "required": [
+          "language"
+        ],
+        "properties": {
+          "content": {
+            "$ref": "#/$defs/content_lesson_v2"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "schema_version": {
+            "const": 2
+          },
+          "kind": {
+            "const": "meeting"
+          }
+        },
+        "required": [
+          "schema_version",
+          "kind"
+        ]
+      },
+      "then": {
+        "required": [
+          "language"
+        ],
+        "properties": {
+          "content": {
+            "$ref": "#/$defs/content_meeting_v2"
+          }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "content_v1": {
       "type": "object",
       "additionalProperties": false,
       "required": [
@@ -128,47 +265,447 @@
           }
         }
       }
-    }
-  },
-  "required": [
-    "schema_version",
-    "note_id",
-    "kind",
-    "job_id",
-    "generated_at",
-    "model",
-    "based_on_parts",
-    "content"
-  ],
-  "allOf": [
-    {
-      "if": {
-        "properties": {
-          "kind": {
-            "const": "meeting"
+    },
+    "point_l1": {
+      "oneOf": [
+        {
+          "type": "string",
+          "minLength": 1
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "text",
+            "children"
+          ],
+          "properties": {
+            "text": {
+              "type": "string",
+              "minLength": 1
+            },
+            "children": {
+              "type": "array",
+              "items": {
+                "oneOf": [
+                  {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "text",
+                      "children"
+                    ],
+                    "properties": {
+                      "text": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "children": {
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "minLength": 1
+                        }
+                      }
+                    }
+                  }
+                ]
+              }
+            }
           }
         }
+      ]
+    },
+    "outline_section": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "heading",
+        "points"
+      ],
+      "properties": {
+        "heading": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "points": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/point_l1"
+          }
+        }
+      }
+    },
+    "key_point": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "text",
+        "kind"
+      ],
+      "properties": {
+        "text": {
+          "type": "string",
+          "minLength": 1
+        },
+        "kind": {
+          "enum": [
+            "key",
+            "important",
+            "definition",
+            "formula",
+            "example"
+          ]
+        },
+        "term": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        }
       },
-      "then": {
-        "properties": {
-          "content": {
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "enum": [
+                  "definition",
+                  "formula"
+                ]
+              }
+            },
             "required": [
-              "decisions",
-              "action_items"
+              "kind"
+            ]
+          },
+          "then": {
+            "required": [
+              "term"
             ]
           }
         }
+      ]
+    },
+    "figure": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "title",
+        "caption",
+        "svg"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^f[0-9]{2}$"
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "caption": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 500
+        },
+        "svg": {
+          "type": "string",
+          "minLength": 20,
+          "maxLength": 20000,
+          "pattern": "^\\s*<svg[\\s>]"
+        },
+        "refs": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200,
+          "description": "exact heading of the outline section this figure belongs to"
+        }
+      }
+    },
+    "material": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "title",
+        "text"
+      ],
+      "properties": {
+        "kind": {
+          "enum": [
+            "practice_question",
+            "flashcard",
+            "summary",
+            "topic_to_review",
+            "search_terms",
+            "exercise"
+          ]
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "text": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 2000
+        },
+        "answer": {
+          "type": "string",
+          "maxLength": 2000
+        }
       },
-      "else": {
-        "properties": {
-          "content": {
+      "allOf": [
+        {
+          "if": {
             "properties": {
-              "decisions": false,
-              "action_items": false
-            }
+              "kind": {
+                "const": "flashcard"
+              }
+            },
+            "required": [
+              "kind"
+            ]
+          },
+          "then": {
+            "required": [
+              "answer"
+            ]
+          }
+        }
+      ]
+    },
+    "homework_item": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "task",
+        "source"
+      ],
+      "properties": {
+        "task": {
+          "type": "string",
+          "minLength": 1
+        },
+        "details": {
+          "type": "string"
+        },
+        "source": {
+          "enum": [
+            "lesson",
+            "suggested"
+          ]
+        },
+        "due": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "uncertainty": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "text",
+        "reason"
+      ],
+      "properties": {
+        "text": {
+          "type": "string",
+          "minLength": 1
+        },
+        "reason": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "action_item": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "task"
+      ],
+      "properties": {
+        "task": {
+          "type": "string"
+        },
+        "owner": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "due": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "content_lesson_v2": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "title",
+        "description",
+        "outline",
+        "key_points",
+        "figures",
+        "study_materials",
+        "homework",
+        "open_questions",
+        "uncertainties"
+      ],
+      "properties": {
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "description": {
+          "type": "string",
+          "minLength": 20,
+          "maxLength": 1000,
+          "description": "2-4 sentences (validator warns outside 2-4)"
+        },
+        "outline": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/outline_section"
+          }
+        },
+        "key_points": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/key_point"
+          }
+        },
+        "figures": {
+          "type": "array",
+          "maxItems": 6,
+          "items": {
+            "$ref": "#/$defs/figure"
+          }
+        },
+        "open_questions": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "uncertainties": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/uncertainty"
+          }
+        },
+        "study_materials": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/material"
+          }
+        },
+        "homework": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/homework_item"
+          }
+        }
+      }
+    },
+    "content_meeting_v2": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "title",
+        "description",
+        "outline",
+        "key_points",
+        "decisions",
+        "action_items",
+        "open_questions",
+        "uncertainties"
+      ],
+      "properties": {
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "description": {
+          "type": "string",
+          "minLength": 20,
+          "maxLength": 1000,
+          "description": "2-4 sentences (validator warns outside 2-4)"
+        },
+        "outline": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/outline_section"
+          }
+        },
+        "key_points": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/key_point"
+          }
+        },
+        "figures": {
+          "type": "array",
+          "maxItems": 6,
+          "items": {
+            "$ref": "#/$defs/figure"
+          }
+        },
+        "open_questions": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "uncertainties": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/uncertainty"
+          }
+        },
+        "decisions": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "action_items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/action_item"
+          }
+        },
+        "follow_up_materials": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/material"
           }
         }
       }
     }
-  ]
+  }
 }

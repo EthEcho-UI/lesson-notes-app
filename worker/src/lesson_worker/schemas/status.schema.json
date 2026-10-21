@@ -6,7 +6,10 @@
   "additionalProperties": false,
   "properties": {
     "schema_version": {
-      "const": 1
+      "enum": [
+        1,
+        2
+      ]
     },
     "note_id": {
       "type": "string",
@@ -27,10 +30,12 @@
         "queued",
         "transcribing",
         "diarizing",
+        "reading_images",
         "summarizing",
         "done",
         "failed"
-      ]
+      ],
+      "description": "reading_images (v2): only written when the job carries images; sits between diarizing/transcribing and summarizing"
     },
     "queue_position": {
       "oneOf": [
@@ -180,7 +185,8 @@
             "diarize",
             "summarize",
             "commit",
-            "cleanup"
+            "cleanup",
+            "read_images"
           ]
         },
         "failed_at": {
@@ -224,6 +230,15 @@
         "type": "string",
         "pattern": "^[0-9A-HJKMNP-TV-Z]{26}$"
       }
+    },
+    "images_kept": {
+      "type": "array",
+      "maxItems": 12,
+      "items": {
+        "type": "string",
+        "pattern": "^i[0-9]{2}$"
+      },
+      "description": "v2, set in the completion commit: image ids present under notes/<noteId>/images/ after this job"
     }
   },
   "required": [
@@ -287,6 +302,28 @@
           "finished_at": {
             "type": "string",
             "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?Z$"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "schema_version": {
+            "const": 1
+          }
+        },
+        "required": [
+          "schema_version"
+        ]
+      },
+      "then": {
+        "properties": {
+          "images_kept": false,
+          "state": {
+            "not": {
+              "const": "reading_images"
+            }
           }
         }
       }

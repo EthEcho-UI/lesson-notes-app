@@ -6,7 +6,10 @@
   "additionalProperties": false,
   "properties": {
     "schema_version": {
-      "const": 1
+      "enum": [
+        1,
+        2
+      ]
     },
     "job_id": {
       "type": "string",
@@ -35,7 +38,8 @@
     "language": {
       "type": "string",
       "pattern": "^[a-z]{2,3}$",
-      "default": "cs"
+      "default": "cs",
+      "description": "v1 only (v2: language_mode)"
     },
     "action": {
       "enum": [
@@ -126,6 +130,101 @@
           }
         }
       }
+    },
+    "language_mode": {
+      "enum": [
+        "cs",
+        "en",
+        "mixed"
+      ],
+      "description": "cs = force Czech, en = force English, mixed = per-segment detection restricted to cs/en"
+    },
+    "context": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "subject",
+        "topic",
+        "details"
+      ],
+      "properties": {
+        "subject": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200,
+          "description": "defaults to the notebook name (PWA fills it in when the note is created)"
+        },
+        "topic": {
+          "type": "string",
+          "maxLength": 300,
+          "description": "short: what the lesson/meeting was about; may be empty"
+        },
+        "details": {
+          "type": "string",
+          "maxLength": 2000,
+          "description": "free text: what was covered, key terms, teacher, exam relevance; may be empty"
+        }
+      },
+      "description": "snapshot of note.json context at submission time"
+    },
+    "images": {
+      "type": "array",
+      "maxItems": 12,
+      "description": "v2: the COMPLETE image set the worker must show to the model for this run (not only new ones). location=inbox: file is on the inbox branch next to job.json; main: already kept at notes/<noteId>/<file>; local: laptop cache next to the local audio",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "file",
+          "bytes",
+          "sha256",
+          "width",
+          "height",
+          "location"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^i[0-9]{2}$"
+          },
+          "bytes": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 614400,
+            "description": "<= 600 KiB, client-resized"
+          },
+          "sha256": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "width": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 4096
+          },
+          "height": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 4096
+          },
+          "caption": {
+            "type": "string",
+            "maxLength": 200
+          },
+          "file": {
+            "type": "string",
+            "pattern": "^images/[0-9]{2}\\.(jpg|png|webp)$"
+          },
+          "location": {
+            "enum": [
+              "inbox",
+              "main",
+              "local"
+            ]
+          }
+        }
+      }
     }
   },
   "required": [
@@ -135,7 +234,6 @@
     "kind",
     "created_at",
     "source",
-    "language",
     "action",
     "append",
     "audio_location",
@@ -164,6 +262,47 @@
             "maxItems": 0
           }
         }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "schema_version": {
+            "const": 1
+          }
+        },
+        "required": [
+          "schema_version"
+        ]
+      },
+      "then": {
+        "required": [
+          "language"
+        ],
+        "properties": {
+          "language_mode": false,
+          "context": false,
+          "images": false
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "schema_version": {
+            "const": 2
+          }
+        },
+        "required": [
+          "schema_version"
+        ]
+      },
+      "then": {
+        "required": [
+          "language_mode",
+          "context",
+          "images"
+        ]
       }
     }
   ]

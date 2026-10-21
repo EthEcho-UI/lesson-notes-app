@@ -6,7 +6,10 @@
   "additionalProperties": false,
   "properties": {
     "schema_version": {
-      "const": 1
+      "enum": [
+        1,
+        2
+      ]
     },
     "note_id": {
       "type": "string",
@@ -15,7 +18,8 @@
     "language": {
       "type": "string",
       "pattern": "^[a-z]{2,3}$",
-      "default": "cs"
+      "default": "cs",
+      "description": "v1: always cs. v2: dominant detected language of the audio (cs, en or another ISO 639 code)"
     },
     "engine": {
       "type": "object",
@@ -125,6 +129,40 @@
                 "speaker": {
                   "type": "string",
                   "minLength": 1
+                },
+                "lang": {
+                  "type": "string",
+                  "pattern": "^[a-z]{2,3}$",
+                  "description": "language the segment text was FINALLY decoded with. cs mode: cs; en mode: en; mixed: cs or en"
+                },
+                "lang_detected": {
+                  "type": "string",
+                  "pattern": "^[a-z]{2,3}$",
+                  "description": "only when the first detection differed from lang (segment was re-run with the dominant cs/en language)"
+                }
+              }
+            }
+          },
+          "detected_languages": {
+            "type": "array",
+            "minItems": 1,
+            "description": "raw detector output for the part: share of speech time per detected language, shares sum ~1",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "lang",
+                "share"
+              ],
+              "properties": {
+                "lang": {
+                  "type": "string",
+                  "pattern": "^[a-z]{2,3}$"
+                },
+                "share": {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 1
                 }
               }
             }
@@ -149,6 +187,14 @@
           "minLength": 1
         }
       }
+    },
+    "language_mode": {
+      "enum": [
+        "cs",
+        "en",
+        "mixed"
+      ],
+      "description": "cs = force Czech, en = force English, mixed = per-segment detection restricted to cs/en"
     }
   },
   "required": [
@@ -160,5 +206,77 @@
     "updated_at",
     "parts",
     "merged"
+  ],
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "schema_version": {
+            "const": 1
+          }
+        },
+        "required": [
+          "schema_version"
+        ]
+      },
+      "then": {
+        "properties": {
+          "language_mode": false,
+          "parts": {
+            "items": {
+              "properties": {
+                "detected_languages": false,
+                "segments": {
+                  "items": {
+                    "properties": {
+                      "lang": false,
+                      "lang_detected": false
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "schema_version": {
+            "const": 2
+          }
+        },
+        "required": [
+          "schema_version"
+        ]
+      },
+      "then": {
+        "required": [
+          "language_mode"
+        ],
+        "properties": {
+          "parts": {
+            "items": {
+              "required": [
+                "detected_languages"
+              ],
+              "properties": {
+                "segments": {
+                  "items": {
+                    "required": [
+                      "start",
+                      "end",
+                      "text",
+                      "lang"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
   ]
 }

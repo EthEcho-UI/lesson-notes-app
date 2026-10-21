@@ -6,7 +6,10 @@
   "additionalProperties": false,
   "properties": {
     "schema_version": {
-      "const": 1
+      "enum": [
+        1,
+        2
+      ]
     },
     "id": {
       "type": "string",
@@ -48,7 +51,8 @@
     "language": {
       "type": "string",
       "pattern": "^[a-z]{2,3}$",
-      "default": "cs"
+      "default": "cs",
+      "description": "v1 only (v2: use language_mode; if present in v2 it is the NOTES language and must be cs)"
     },
     "parts": {
       "type": "array",
@@ -137,6 +141,133 @@
           }
         }
       }
+    },
+    "language_mode": {
+      "enum": [
+        "cs",
+        "en",
+        "mixed"
+      ],
+      "description": "cs = force Czech, en = force English, mixed = per-segment detection restricted to cs/en",
+      "default": "mixed"
+    },
+    "context": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "subject",
+        "topic",
+        "details"
+      ],
+      "properties": {
+        "subject": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200,
+          "description": "defaults to the notebook name (PWA fills it in when the note is created)"
+        },
+        "topic": {
+          "type": "string",
+          "maxLength": 300,
+          "description": "short: what the lesson/meeting was about; may be empty"
+        },
+        "details": {
+          "type": "string",
+          "maxLength": 2000,
+          "description": "free text: what was covered, key terms, teacher, exam relevance; may be empty"
+        }
+      }
+    },
+    "inputs_updated_at": {
+      "type": "string",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?Z$",
+      "description": "v2, PWA: set whenever language_mode/context/images change; PWA offers regenerate when it is newer than notes.generated_at"
+    },
+    "images": {
+      "type": "array",
+      "maxItems": 12,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "filename",
+          "bytes",
+          "sha256",
+          "width",
+          "height",
+          "uploaded_at",
+          "status"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^i[0-9]{2}$"
+          },
+          "bytes": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 614400,
+            "description": "<= 600 KiB, client-resized"
+          },
+          "sha256": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "width": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 4096
+          },
+          "height": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 4096
+          },
+          "caption": {
+            "type": "string",
+            "maxLength": 200
+          },
+          "filename": {
+            "type": "string",
+            "pattern": "^[0-9]{2}\\.(jpg|png|webp)$",
+            "description": "NN.ext (jpg|png|webp); NN matches the id (iNN); same name on inbox and main"
+          },
+          "uploaded_at": {
+            "oneOf": [
+              {
+                "type": "string",
+                "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?Z$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "status": {
+            "enum": [
+              "uploading",
+              "uploaded",
+              "failed"
+            ]
+          }
+        },
+        "if": {
+          "properties": {
+            "status": {
+              "const": "uploaded"
+            }
+          }
+        },
+        "then": {
+          "properties": {
+            "uploaded_at": {
+              "type": "string",
+              "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?Z$"
+            }
+          }
+        }
+      }
     }
   },
   "required": [
@@ -147,7 +278,55 @@
     "notebook_id",
     "created_at",
     "source",
-    "language",
     "parts"
+  ],
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "schema_version": {
+            "const": 1
+          }
+        },
+        "required": [
+          "schema_version"
+        ]
+      },
+      "then": {
+        "required": [
+          "language"
+        ],
+        "properties": {
+          "language_mode": false,
+          "context": false,
+          "images": false,
+          "inputs_updated_at": false
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "schema_version": {
+            "const": 2
+          }
+        },
+        "required": [
+          "schema_version"
+        ]
+      },
+      "then": {
+        "required": [
+          "language_mode",
+          "context",
+          "images"
+        ],
+        "properties": {
+          "language": {
+            "const": "cs"
+          }
+        }
+      }
+    }
   ]
 }

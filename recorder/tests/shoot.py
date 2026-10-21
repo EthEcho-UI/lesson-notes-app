@@ -69,7 +69,8 @@ with sync_playwright() as p:
     page.set_viewport_size({"width": 390, "height": 900})
     ctx2 = b.new_context(viewport={"width": 390, "height": 900}, color_scheme="dark")
     m = ctx2.new_page()
-    m.goto(url)
+    ctx2.add_cookies(ctx.cookies())   # the launch link is single-use: reuse the session the first context obtained
+    m.goto(url.split("?")[0])
     m.wait_for_selector("#notes li")
     m.screenshot(path=str(out / "ui-mobile-dark.png"), full_page=True)
     b.close()

@@ -27,9 +27,7 @@ class Client:
     def __init__(self, app, cookie=True):
         self.app, self.cookie = app, None
         if cookie:
-            r = self.req("GET", f"/?t={app.token}")
-            assert r.status == 303 and r.getheader("Location") == "/"
-            self.cookie = r.getheader("Set-Cookie").split(";")[0]
+            self.cookie = f"{app.cookie_name}={app.token}"   # what the single-use exchange hands out (tested separately)
 
     def req(self, method, path, body=None, headers=None, host=None, origin="default", ctype="application/json"):
         h = {"Host": f"127.0.0.1:{self.app.port}" if host is None else host}
@@ -89,8 +87,19 @@ def test_token_header_and_cookie_work(ui):
     c2 = Client(ui)
     r = c2.req("GET", "/")
     assert r.status == 200
-    set_cookie = Client(ui, cookie=False).req("GET", f"/?t={ui.token}").getheader("Set-Cookie")
+    set_cookie = Client(ui, cookie=False).req("GET", f"/?t={ui.launch_token}").getheader("Set-Cookie")
     assert "HttpOnly" in set_cookie and "SameSite=Strict" in set_cookie and "Path=/" in set_cookie
+
+
+def test_launch_token_is_single_use_and_not_the_session_token(ui, tmp_path):
+    """Security review: the opened URL (visible in argv/browser history) must stop working after the first exchange."""
+    assert ui.launch_token != ui.token and ui.launch_token in ui.url and ui.token not in ui.url
+    c = Client(ui, cookie=False)
+    r = c.req("GET", f"/?t={ui.launch_token}")
+    assert r.status == 303 and ui.token in r.getheader("Set-Cookie") and ui.launch_token not in r.getheader("Set-Cookie")
+    assert c.req("GET", f"/?t={ui.launch_token}").status == 403        # second use of the link: dead
+    assert c.req("GET", f"/?t={ui.token}").status == 403               # the session token is not a valid URL token
+    assert Client(ui).req("GET", "/api/state").status == 200           # the cookie session keeps working
 
 
 @pytest.mark.parametrize("host", ["evil.example", "evil.example:80", "127.0.0.1", "127.0.0.1.evil.example:%PORT%", "localhost", "[::1]:%PORT%", ""])
@@ -268,9 +277,12 @@ def test_ui_command_picks_free_port_reuses_itself_and_leaves_recording_alone(ctx
         port, token = int(m.group(1)), m.group(2)
         assert json.loads(ctx.paths.ui_file.read_text())["port"] == port and oct(ctx.paths.ui_file.stat().st_mode & 0o777) == "0o600"
         again = subprocess.run([sys.executable, "-m", "lesson_record.cli", "ui", "--no-browser"], capture_output=True, text=True, timeout=20)
-        assert "already running" in again.stdout and token in again.stdout
-        app = type("A", (), {"port": port, "token": token})
-        c = Client(app)
+        assert "already running" in again.stdout and token not in again.stdout       # the single-use launch link is never re-printed or stored
+        app = type("A", (), {"port": port, "token": token, "cookie_name": f"lr_{port}"})
+        r = Client(app, cookie=False).req("GET", f"/?t={token}")                    # first browser visit: exchange the link for the session cookie
+        assert r.status == 303
+        c = Client(app, cookie=False)
+        c.cookie = r.getheader("Set-Cookie").split(";")[0]
         nb = c.json("GET", "/api/remote?force=1")[1]["remote"]["notebooks"][0]["id"]
         assert c.json("POST", "/api/start", {"kind": "lesson", "notebook_id": nb})[0] == 200
         p.send_signal(signal.SIGTERM)                                  # the UI goes away (terminal closed, Ctrl+C ...)

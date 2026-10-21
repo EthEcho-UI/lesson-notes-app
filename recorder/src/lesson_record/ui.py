@@ -46,7 +46,10 @@ MAX_BODY = 16 * 1024
 class UIApp:
     def __init__(self, wcfg, rcfg, paths, port=0, token=None):
         self.wcfg, self.rcfg, self.paths = wcfg, rcfg, paths
-        self.token = token or secrets.token_urlsafe(32)
+        self.token = token or secrets.token_urlsafe(32)          # session token: lives in the HttpOnly cookie / X-LR-Token header only
+        self.launch_token = secrets.token_urlsafe(32)            # in the opened URL only; single use, then dead (the URL shows up in argv/history)
+        self._launch_lock = threading.Lock()
+        self._launch_used = False
         self.remote = Remote(wcfg, paths)
         self.cookie_name = None
         self.server = ThreadingHTTPServer(("127.0.0.1", port), self._handler())
@@ -66,7 +69,7 @@ class UIApp:
 
     @property
     def url(self):
-        return f"http://127.0.0.1:{self.port}/?t={self.token}"
+        return f"http://127.0.0.1:{self.port}/?t={self.launch_token}"
 
     def serve_forever(self):
         threading.Thread(target=self._background, daemon=True).start()
@@ -191,8 +194,10 @@ class UIApp:
                     # first visit: exchange the URL token for the cookie, then drop it from the address bar
                     if self.headers.get("Host", "") not in app.hosts:
                         return self._deny("bad Host")
-                    if not secrets.compare_digest(parse_qs(u.query)["t"][0].encode(), app.token.encode()):
-                        return self._deny("bad token")
+                    with app._launch_lock:
+                        if app._launch_used or not secrets.compare_digest(parse_qs(u.query)["t"][0].encode(), app.launch_token.encode()):
+                            return self._deny("bad or already used launch token")
+                        app._launch_used = True
                     return self._send(303, b"", "text/plain", {"Location": "/", "Set-Cookie":
                                       f"{app.cookie_name}={app.token}; HttpOnly; SameSite=Strict; Path=/"})
                 if u.path == "/ws":
@@ -342,14 +347,16 @@ def serve(wcfg, rcfg, paths, port=0, open_browser=True):
     paths.ensure()
     old = read_json(paths.ui_file)
     if old and isinstance(old.get("pid"), int) and _pid_alive(old["pid"]) and old.get("url"):
-        print(f"UI already running (pid {old['pid']}): {old['url']}", flush=True)
+        # the launch link was single-use and is gone; the browser that used it already holds the session cookie
+        print(f"UI already running (pid {old['pid']}): {old['url']}\n"
+              f"Open it in the browser you used before. If it answers 403, stop it (kill {old['pid']}) and run `lesson-record ui` again.", flush=True)
         if open_browser:
             webbrowser.open(old["url"])
         return 0
     app = UIApp(wcfg, rcfg, paths, port)
-    write_json(paths.ui_file, {"pid": os.getpid(), "port": app.port, "url": app.url})
+    write_json(paths.ui_file, {"pid": os.getpid(), "port": app.port, "url": f"http://127.0.0.1:{app.port}/"})  # no token on disk
     print(f"lesson-record UI: {app.url}", flush=True)
-    print("Bound to 127.0.0.1 only; the link contains a one-time-per-launch token. Ctrl+C closes the UI - a running recording keeps going.")
+    print("Bound to 127.0.0.1 only; the link contains a single-use launch token (valid for the first browser visit only). Ctrl+C closes the UI - a running recording keeps going.")
     signal.signal(signal.SIGTERM, lambda *_: threading.Thread(target=app.server.shutdown, daemon=True).start())
     if open_browser:
         threading.Timer(0.5, lambda: webbrowser.open(app.url)).start()

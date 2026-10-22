@@ -1,0 +1,4 @@
+out/*
+!out/.gitignore
+!out/sample/
+inputs_long/

@@ -1,0 +1,246 @@
+{
+ "title": "Kvadratická rovnice: diskriminant a parabola",
+ "description": "Hodina o řešení kvadratické rovnice pomocí diskriminantu a o souvislosti s grafem funkce, parabolou. Na příkladu 2x² − 5x + 3 = 0 se ukázalo určení koeficientů, výpočet D, dosazení do vzorce a zkouška. Diskriminant se podle učitele na písemce ptá vždycky. Domácí úkol: pracovní sešit, strana 31, příklady 12 a 14, odevzdat příští středu.",
+ "outline": [
+  {
+   "heading": "Obecný tvar a určení koeficientů",
+   "points": [
+    "Obecný tvar kvadratické rovnice: ax² + bx + c = 0; a, b, c jsou čísla (koeficienty)",
+    "Podmínka a ≠ 0: kdyby a = 0, není tam x² a je to lineární rovnice (na tu se rádo zapomíná)",
+    {
+     "text": "Určení koeficientů: a je číslo před x², b je číslo u x, c je osamocené číslo na konci",
+     "children": [
+      "Pozor na znaménka: minus patří k číslu za ním (nejčastější chyba), minus si vezmeš s sebou",
+      "Příklad: 2x² − 5x + 3 = 0 → a = 2, b = −5, c = 3"
+     ]
+    },
+    "Rovnice zapsaná v jiném pořadí: nejdřív ji převést na základní tvar (všechno na jednu stranu, vpravo nula, seřadit podle mocnin), teprve pak číst a, b, c"
+   ]
+  },
+  {
+   "heading": "Diskriminant a počet řešení",
+   "points": [
+    "Diskriminant: D = b² − 4ac (b² minus čtyři krát a krát c)",
+    "Pozor: b² je kladné i při záporném b (minus krát minus je plus); na písemkách se to chybuje často",
+    {
+     "text": "Tři případy podle D",
+     "children": [
+      "D > 0: dva různé reálné kořeny",
+      "D = 0: jeden, takzvaný dvojnásobný kořen",
+      "D < 0: žádný reálný kořen; neznamená to, že řešení je nula, nula je jiné řešení než žádné řešení"
+     ]
+    },
+    {
+     "text": "Proč to tak je: ve vzorci je √D",
+     "children": [
+      "Z a záporného čísla nejde v reálných číslech odmocnina → D < 0 žádný reálný kořen",
+      "D = 0: √0 = 0, takže −b + 0 a −b − 0 jsou totéž → jeden kořen"
+     ]
+    }
+   ]
+  },
+  {
+   "heading": "Vzorec pro kořeny",
+   "points": [
+    "x₁,₂ = (−b ± √D) / (2a)",
+    "Ve jmenovateli je 2a, ne 2ac",
+    "Zlomková čára je přes celý čitatel: dělí se jak −b, tak odmocnina (nejen odmocnina)",
+    "Jednou se dosadí plus, podruhé mínus → x₁ a x₂"
+   ]
+  },
+  {
+   "heading": "Příklad: 2x² − 5x + 3 = 0",
+   "points": [
+    "a = 2, b = −5, c = 3",
+    "D = b² − 4ac = 25 − 24 = 1 → D > 0, čekají se dva různé kořeny",
+    "x₁,₂ = (5 ± 1) / 4",
+    "x₁ = 3/2, x₂ = 1",
+    "Zkouška: dosadit každý kořen zpět do původní rovnice, musí vyjít nula (učitel ji doporučuje dělat vždycky)"
+   ]
+  },
+  {
+   "heading": "Graf: parabola a počet kořenů",
+   "points": [
+    "Řešení rovnice ax² + bx + c = 0 odpovídá průsečíkům grafu funkce y = ax² + bx + c s osou x",
+    "Grafem je parabola; a > 0: otevřená nahoru (úsměv), a < 0: otevřená dolů (smutný obličej)",
+    "Vrchol: bod, kde se parabola otáčí (u a > 0 nejnižší bod)",
+    {
+     "text": "Souvislost s D (nakreslit si všechny tři případy)",
+     "children": [
+      "D > 0: parabola protíná osu x ve dvou bodech (kořeny)",
+      "D = 0: parabola se osy x jen dotkne vrcholem",
+      "D < 0: parabola leží nad osou x a osu neprotne (případ a > 0)"
+     ]
+    },
+    "V příkladu y = 2x² − 5x + 3 jsou průsečíky s osou x v bodech 1 a 3/2; vrchol V leží mezi nimi",
+    "Vrchol leží uprostřed mezi kořeny, na ose symetrie; x-ová souřadnice vrcholu = −b / (2a), což je první část vzorce před odmocninou",
+    "Odmocnina určuje, jak daleko od středu jsou kořeny na obě strany"
+   ]
+  },
+  {
+   "heading": "Další poznámky k počítání",
+   "points": [
+    "Když D vyjde s odmocninou: nechat s odmocninou, nebo zaokrouhlit podle zadání; když zadání nic neříká, nechat přesný tvar",
+    "Kalkulačka je povolená, ale nespoléhat na ni (neodhalí opsané špatné znaménko)",
+    "Druhá cesta řešení, rozklad na součin a Viètovy vzorce, bude příště; dnes jen diskriminant",
+    "Na konci hodiny se začal počítat další společný příklad začínající 2x² (zadání v přepisu není celé)"
+   ]
+  },
+  {
+   "heading": "Organizační poznámky",
+   "points": [
+    "Domácí úkol: pracovní sešit, str. 31, příklady 12 a 14 (13 ne, je těžká); odevzdat příští středu, ne ve čtvrtek",
+    "Kdo to nestihne, má napsat e-mail dopředu, ne ve středu ráno"
+   ]
+  }
+ ],
+ "key_points": [
+  {
+   "kind": "definition",
+   "term": "Kvadratická rovnice",
+   "text": "Rovnice tvaru ax² + bx + c = 0, kde a, b, c jsou koeficienty a a ≠ 0 (jinak by byla lineární)."
+  },
+  {
+   "kind": "formula",
+   "term": "Diskriminant",
+   "text": "D = b² − 4ac"
+  },
+  {
+   "kind": "formula",
+   "term": "Kořeny kvadratické rovnice",
+   "text": "x₁,₂ = (−b ± √D) / (2a); zlomková čára je přes celý čitatel, ve jmenovateli je 2a."
+  },
+  {
+   "kind": "key",
+   "text": "D > 0: dva různé reálné kořeny; D = 0: jeden dvojnásobný kořen; D < 0: žádný reálný kořen."
+  },
+  {
+   "kind": "important",
+   "text": "Diskriminant se na písemce ptá vždycky, umět ho je nutné."
+  },
+  {
+   "kind": "important",
+   "text": "Znaménko patří k číslu: b = −5 má b² = 25. Nejčastější chyba je ztracené minus."
+  },
+  {
+   "kind": "important",
+   "text": "D < 0 neznamená, že řešení je 0. Znamená, že v reálných číslech žádné řešení neexistuje."
+  },
+  {
+   "kind": "important",
+   "text": "Zkoušku dělat vždycky: dosadit kořeny zpět do původní rovnice, musí vyjít nula."
+  },
+  {
+   "kind": "formula",
+   "term": "Souřadnice x vrcholu paraboly",
+   "text": "x_V = −b / (2a); vrchol leží uprostřed mezi kořeny, na ose symetrie."
+  },
+  {
+   "kind": "example",
+   "text": "2x² − 5x + 3 = 0: a = 2, b = −5, c = 3; D = 25 − 24 = 1; x₁,₂ = (5 ± 1)/4; x₁ = 3/2, x₂ = 1."
+  },
+  {
+   "kind": "key",
+   "text": "Parabola y = ax² + bx + c: a > 0 otevřená nahoru, a < 0 otevřená dolů; kořeny rovnice jsou průsečíky s osou x."
+  }
+ ],
+ "figures": [
+  {
+   "id": "f01",
+   "title": "Počet kořenů a poloha paraboly",
+   "caption": "Parabola otevřená nahoru (a > 0) a počet průsečíků s osou x podle znaménka diskriminantu.",
+   "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 800 500\"><rect x=\"0\" y=\"0\" width=\"800\" height=\"500\" fill=\"#ffffff\" /><text x=\"140\" y=\"60\" font-family=\"sans-serif\" font-size=\"24\" text-anchor=\"middle\" fill=\"#263238\">D &gt; 0</text><text x=\"400\" y=\"60\" font-family=\"sans-serif\" font-size=\"24\" text-anchor=\"middle\" fill=\"#263238\">D = 0</text><text x=\"660\" y=\"60\" font-family=\"sans-serif\" font-size=\"24\" text-anchor=\"middle\" fill=\"#263238\">D &lt; 0</text><line x1=\"30\" y1=\"300\" x2=\"250\" y2=\"300\" stroke=\"#455a64\" stroke-width=\"2\" /><line x1=\"290\" y1=\"300\" x2=\"510\" y2=\"300\" stroke=\"#455a64\" stroke-width=\"2\" /><line x1=\"550\" y1=\"300\" x2=\"770\" y2=\"300\" stroke=\"#455a64\" stroke-width=\"2\" /><path d=\"M50,150 Q140,530 230,150\" fill=\"none\" stroke=\"#1565c0\" stroke-width=\"2\" /><path d=\"M310,150 Q400,450 490,150\" fill=\"none\" stroke=\"#1565c0\" stroke-width=\"2\" /><path d=\"M570,150 Q660,330 750,150\" fill=\"none\" stroke=\"#1565c0\" stroke-width=\"2\" /><circle cx=\"99\" cy=\"300\" r=\"6\" fill=\"#c62828\" /><circle cx=\"181\" cy=\"300\" r=\"6\" fill=\"#c62828\" /><circle cx=\"400\" cy=\"300\" r=\"6\" fill=\"#c62828\" /><text x=\"140\" y=\"390\" font-family=\"sans-serif\" font-size=\"18\" text-anchor=\"middle\" fill=\"#263238\">dva různé kořeny</text><text x=\"400\" y=\"390\" font-family=\"sans-serif\" font-size=\"18\" text-anchor=\"middle\" fill=\"#263238\">jeden dvojnásobný kořen</text><text x=\"660\" y=\"390\" font-family=\"sans-serif\" font-size=\"18\" text-anchor=\"middle\" fill=\"#263238\">žádný reálný kořen</text><text x=\"400\" y=\"460\" font-family=\"sans-serif\" font-size=\"18\" text-anchor=\"middle\" fill=\"#263238\">Případ a &gt; 0 (parabola otevřená nahoru)</text></svg>",
+   "refs": "Graf: parabola a počet kořenů"
+  }
+ ],
+ "study_materials": [
+  {
+   "kind": "practice_question",
+   "title": "Koeficienty se záporným znaménkem",
+   "text": "Urči a, b, c v rovnici −3x² + x − 7 = 0 a vypočítej b².",
+   "answer": "a = −3, b = 1, c = −7 (minus patří k číslu za ním). b² = 1² = 1."
+  },
+  {
+   "kind": "practice_question",
+   "title": "Rovnice v jiném pořadí",
+   "text": "Rovnice je zapsána jako 3 + 2x² = 5x. Jak z ní zjistíš a, b, c?",
+   "answer": "Nejdřív ji převedeme na základní tvar: všechno na jednu stranu, vpravo nula, seřadit podle mocnin: 2x² − 5x + 3 = 0. Pak a = 2, b = −5, c = 3."
+  },
+  {
+   "kind": "practice_question",
+   "title": "Proč D < 0 nemá reálný kořen",
+   "text": "Vysvětli, proč rovnice s D < 0 nemá v reálných číslech řešení a proč při D = 0 vychází jen jeden kořen.",
+   "answer": "Ve vzorci je √D. Ze záporného čísla nejde v reálných číslech odmocnina, proto při D < 0 žádný reálný kořen. Při D = 0 je √0 = 0, takže −b + 0 a −b − 0 dávají totéž číslo, tedy jeden (dvojnásobný) kořen."
+  },
+  {
+   "kind": "practice_question",
+   "title": "Výpočet D a počet kořenů",
+   "text": "Spočítej D pro rovnici x² − 4x + 4 = 0 a rozhodni, kolik má kořenů.",
+   "answer": "a = 1, b = −4, c = 4. D = (−4)² − 4 · 1 · 4 = 16 − 16 = 0. Rovnice má jeden dvojnásobný kořen: x = 4/2 = 2. Parabola se osy x dotýká vrcholem."
+  },
+  {
+   "kind": "practice_question",
+   "title": "Graf a kořeny",
+   "text": "Parabola y = ax² + bx + c leží celá nad osou x. Jaké je D a kolik reálných kořenů má rovnice? Co víme o a?",
+   "answer": "Parabola osu x neprotíná, takže D < 0 a rovnice nemá žádný reálný kořen. Parabola je otevřená nahoru, tedy a > 0."
+  },
+  {
+   "kind": "flashcard",
+   "title": "Diskriminant",
+   "text": "Jaký je vzorec pro diskriminant?",
+   "answer": "D = b² − 4ac"
+  },
+  {
+   "kind": "flashcard",
+   "title": "Vzorec pro kořeny",
+   "text": "Jak se spočítají kořeny kvadratické rovnice?",
+   "answer": "x₁,₂ = (−b ± √D) / (2a); zlomková čára je přes celý čitatel."
+  },
+  {
+   "kind": "flashcard",
+   "title": "Vrchol paraboly",
+   "text": "Kde leží vrchol vzhledem ke kořenům a jaká je jeho x-ová souřadnice?",
+   "answer": "Uprostřed mezi kořeny, na ose symetrie; x_V = −b / (2a)."
+  },
+  {
+   "kind": "topic_to_review",
+   "title": "Doplněno: Viètovy vzorce a rozklad na součin",
+   "text": "Učitel zmínil, že příště bude druhá cesta řešení, rozklad na součin a Viètovy vzorce. Nastuduj si, jak se kořeny vztahují ke koeficientům, a vyzkoušej to na kořenech 1 a 3/2 z dnešního příkladu."
+  },
+  {
+   "kind": "search_terms",
+   "title": "Hledání doplňujících materiálů",
+   "text": "kvadratická rovnice diskriminant; parabola vrchol a osa symetrie; Viètovy vzorce; quadratic equation discriminant"
+  }
+ ],
+ "homework": [
+  {
+   "task": "Pracovní sešit, strana 31, příklady 12 a 14",
+   "source": "lesson",
+   "due": "příští středa (ne čtvrtek)",
+   "details": "Příklad 13 ne (je těžký). Kdo to nestihne, má napsat e-mail dopředu, ne ve středu ráno."
+  },
+  {
+   "task": "Doporučeno: Nakresli si všechny tři případy paraboly (D > 0, D = 0, D < 0) a ke každému připiš počet kořenů.",
+   "source": "suggested",
+   "due": null
+  },
+  {
+   "task": "Doporučeno: Vyřeš rovnici 2x² − 5x + 3 = 0 znovu bez předlohy včetně zkoušky.",
+   "source": "suggested",
+   "due": null
+  },
+  {
+   "task": "Doporučeno: Vyzkoušej si určit a, b, c u tří rovnic zapsaných v jiném pořadí a převeď je na základní tvar.",
+   "source": "suggested",
+   "due": null
+  }
+ ],
+ "open_questions": [],
+ "uncertainties": [
+  {
+   "text": "Závěrečný společný příklad (začíná 2x²) není v zápisech rozepsán.",
+   "reason": "V přepisu zazní jen „dvě x na druhou“ a zbytek zadání učitel nechal na studentech nebo ukázal na tabuli; zadání nelze z přepisu ani fotek určit."
+  }
+ ]
+}

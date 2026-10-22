@@ -1,0 +1,18 @@
+{
+ "images_used": [
+  "i01",
+  "i02"
+ ],
+ "images_skipped": [],
+ "prompt_version": "notes_system_v2",
+ "warnings": [],
+ "cost_usd": 0.13056,
+ "input_tokens": 33032,
+ "output_tokens": 8436,
+ "calls": 1,
+ "duration_s": 55.8,
+ "model": "claude-sonnet-5-5",
+ "passes": 1,
+ "wall_s": 56.9,
+ "words_in": 1268
+}

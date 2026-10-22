@@ -1,0 +1,67 @@
+{
+ "unsupported": [
+  {
+   "claim": "„D < 0: parabola leží nad osou x a osu neprotne (případ a > 0)“",
+   "severity": "minor",
+   "why": "Učitel řekl jen „vznáší se někde nad osou“. Upřesnění „(případ a > 0)“ je přidané, i když je věcně správné a užitečné. Mělo by být označené jako doplnění, protože při a < 0 parabola leží pod osou."
+  },
+  {
+   "claim": "Key point „Zkoušku dělat vždycky…“ podaný bez výhrady",
+   "severity": "minor",
+   "why": "Učitel sice říká „dělejte vždycky“, ale na Lucčin dotaz o písemce odpověděl „Musí, nemusí, ale když ji uděláš…“. Poznámky tenhle odstín (na písemce není povinná) vynechávají. Drobné zkreslení."
+  }
+ ],
+ "asr_fixes": [
+  {
+   "heard": "diskriminatu / diskriminat",
+   "notes_wrote": "diskriminant",
+   "correct": "true"
+  },
+  {
+   "heard": "od možnina",
+   "notes_wrote": "odmocnina",
+   "correct": "true"
+  },
+  {
+   "heard": "Para bola",
+   "notes_wrote": "parabola",
+   "correct": "true"
+  },
+  {
+   "heard": "Dvěma a, ne dvěma a c",
+   "notes_wrote": "Ve jmenovateli je 2a, ne 2ac",
+   "correct": "true"
+  },
+  {
+   "heard": "Dvě x na druhou, no a zbytek… (neúplné zadání)",
+   "notes_wrote": "Zadání neuvedeno, přesunuto do uncertainties",
+   "correct": "true"
+  }
+ ],
+ "missed": [
+  "Výrok učitele, že zkouška na písemce není povinná („musí, nemusí“); poznámky uvádějí jen „dělat vždycky“.",
+  "Zdůraznění „Žádné plus, minus“ u vzorce D = b² − 4ac (malá ztráta, protože vzorec je uveden správně).",
+  "Organizační drobnost: fotky tabule mají být sdílené ve skupině (Tereza). Pro studium to není podstatné."
+ ],
+ "czech": [
+  "Překlep: „Z a záporného čísla nejde v reálných číslech odmocnina“, má být „Ze záporného čísla…“.",
+  "Neobratná vazba: „na písemkách se to chybuje často“. Lépe „na písemkách se v tom často chybuje“.",
+  "Formulace „nula je jiné řešení než žádné řešení“ je trochu kostrbatá. Lépe „řešení x = 0 je něco jiného než žádné řešení“.",
+  "„Diskriminant se na písemce ptá vždycky“ přebírá hovorovou vazbu učitele. Ve studijních poznámkách by bylo lepší „na diskriminant se na písemce ptá vždycky“."
+ ],
+ "noise": [],
+ "figures": [
+  "f01 (Počet kořenů a poloha paraboly) je správný a užitečný. Ověřil jsem geometrii Bézierových křivek s osou na y = 300. 1. panel má minimum na y = 340 a osu protíná v x ≈ 98,7 a 181,3, což přesně odpovídá červeným bodům 99 a 181. 2. panel má minimum na y = 300 a osy se dotýká v bodě (400, 300), kde je bod. 3. panel má minimum na y = 240, tedy celý leží nad osou bez průsečíku. Popisky na y = 390 se nepřekrývají s křivkami a nejširší popisek „jeden dvojnásobný kořen“ (~210 px) se vejde do středního panelu. Riziko rozvržení je malé. Chybí osa y, ale pro účel obrázku nevadí. Věrně ilustruje doporučení učitele nakreslit si všechny tři případy."
+ ],
+ "scores": {
+  "faithfulness": 5,
+  "completeness": 5,
+  "structure_usefulness": 5,
+  "czech_quality": 4,
+  "study_homework_usefulness": 5,
+  "noise_control": 5,
+  "overall": 5
+ },
+ "summary": "Poznámky jsou velmi kvalitní a věrné zdroji. Pokrývají obecný tvar s podmínkou a ≠ 0, určení koeficientů včetně znamének a převodu na základní tvar, vzorec pro diskriminant, tři případy podle D včetně zdůvodnění přes √D, vzorec pro kořeny s varováními (2a, zlomková čára přes celý čitatel) a řešený příklad z fotky (D = 1, x₁ = 3/2, x₂ = 1). Dále zkoušku, parabolu (otevření podle a, vrchol, x_V = −b/2a, souvislost s D), Michalův dotaz na odmocninu a kalkulačku, zmínku o Viètových vzorcích na příště, tip na písemku a přesně zachycený domácí úkol (str. 31, př. 12 a 14, ne 13, odevzdat příští středu, e-mail předem). Chatter (Honza, David, přijímačky) je správně vynechaný a neúplný závěrečný příklad je poctivě uvedený jako nejistota. Doplňky ve study_materials jsou správné a doplnění o Viètových vzorcích je označené. Obrázek je geometricky přesný. Výtky jsou drobné: neoznačené upřesnění „(případ a > 0)“, chybí nuance „na písemce musí, nemusí“ a jsou tam jazykové chyby, hlavně „Z a záporného čísla“ a „se to chybuje“.",
+ "_cost_usd": 0.18658639999999999
+}

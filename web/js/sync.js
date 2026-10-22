@@ -54,6 +54,8 @@ async function applyMain(tree) {
   const remote = new Map();
   for (const e of tree) if (e.type === 'blob' && WANTED.test(e.path)) remote.set(e.path, e);
   const todo = [];
+  M.mainImages = new Map(tree.filter((e) => e.type === 'blob' && /^notes\/[^/]+\/images\/[^/]+$/.test(e.path)).map((e) => [e.path, e.sha]));
+  await store.kvSet('mainImages', [...M.mainImages]);
   for (const [path, e] of remote) {
     const local = M.files.get(path);
     if (local && local.pending) continue;          // our own unsent optimistic write wins until the outbox flushed
@@ -85,7 +87,7 @@ async function refreshInbox() {
   if (t.missing) { M.inbox.exists = false; M.inbox.jobs = new Map(); M.inbox.bytes = 0; M.inbox.loaded = true; await store.kvDel('etag:inbox'); await saveInbox(); return; }
   const jobs = new Map();
   let bytes = 0;
-  const files = new Map();
+  const files = new Map(), shas = new Map();
   for (const e of t.tree) {
     if (e.type !== 'blob') continue;
     const m = /^jobs\/([^/]+)\//.exec(e.path);
@@ -93,10 +95,13 @@ async function refreshInbox() {
     bytes += e.size || 0;
     if (!files.has(m[1])) files.set(m[1], []);
     files.get(m[1]).push(e.path);
+    if (!shas.has(m[1])) shas.set(m[1], {});
+    shas.get(m[1])[e.path] = e.sha;
     if (e.path === `jobs/${m[1]}/job.json`) jobs.set(m[1], { sha: e.sha, job: null, files: [] });
   }
   for (const [id, j] of jobs) {
     j.files = files.get(id);
+    j.shas = shas.get(id);
     const old = M.inbox.jobs.get(id);
     if (old && old.sha === j.sha && old.job) { j.job = old.job; continue; }
     try { j.job = JSON.parse(await gh.getBlobText(j.sha)); } catch (e) { if (e instanceof gh.NetworkError || e instanceof gh.AuthError) throw e; }
@@ -137,7 +142,7 @@ export function startPolling(getActive) {
   tick();
 }
 export function noteInterval(code) {
-  if (code === 'transcribing' || code === 'diarizing' || code === 'summarizing') return 5000;
+  if (code === 'transcribing' || code === 'diarizing' || code === 'reading_images' || code === 'summarizing') return 5000;
   if (code === 'waiting') return 15000;
   return 0;
 }

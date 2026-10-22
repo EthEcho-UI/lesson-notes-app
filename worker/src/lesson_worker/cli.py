@@ -94,6 +94,57 @@ def _ok(flag, name, detail="", required=True):
     return flag
 
 
+def model_check(cfg, run=subprocess.run):
+    """(ok, detail): one tiny `claude -p` call with the configured notes model id (costs a fraction of a cent)."""
+    from .notes import _empty_parent, minimal_env, resolve_model
+    try:
+        claude = cfg.find_claude()
+    except Exception as e:
+        return False, str(e)
+    model = resolve_model(cfg)
+    try:
+        r = run([claude, "-p", "--output-format", "json", "--max-turns", "1", "--no-session-persistence", "--tools", "", "--model", model,
+                 "--effort", "low", "--setting-sources", "project", "--strict-mcp-config", "--disable-slash-commands",
+                 "--system-prompt", "Reply with the single word: ok"],
+                input="ping", capture_output=True, text=True, encoding="utf-8", env=minimal_env(claude), timeout=120, cwd=_empty_parent(cfg))
+    except subprocess.TimeoutExpired:
+        return False, f"model {model}: no answer within 120 s"
+    except OSError as e:
+        return False, f"cannot execute claude: {e}"
+    d = None
+    for line in reversed((r.stdout or "").strip().splitlines()):        # one object, or stream-json lines (result last)
+        try:
+            d = json.loads(line)
+            break
+        except ValueError:
+            continue
+    if not isinstance(d, dict):
+        return False, f"model {model}: unreadable answer (exit {r.returncode}): {(r.stdout or r.stderr or '')[:150]}"
+    if d.get("is_error") or r.returncode != 0:
+        return False, f"model {model} rejected: {str(d.get('result') or d.get('error') or r.stderr)[:200]}"
+    used = list((d.get("modelUsage") or {}).keys())
+    return True, f"{model} answered" + (f" (served by {', '.join(used)})" if used else "")
+
+
+def photo_check():
+    """Pillow can decode, scrub and re-check a JPEG with EXIF/GPS (no ffmpeg or ImageMagick involved)."""
+    import io
+    from PIL import Image
+    from .images import clean_image, has_metadata
+    im = Image.new("RGB", (32, 24), (200, 30, 30))
+    ex = Image.Exif()
+    ex[0x010F] = "doctor-camera"
+    ex[0x8825] = {1: "N", 2: (50.0, 5.0, 0.0), 3: "E", 4: (14.0, 25.0, 0.0)}      # GPS IFD
+    buf = io.BytesIO()
+    im.save(buf, "JPEG", exif=ex)
+    if not has_metadata(buf.getvalue(), "jpg"):
+        return False, "test photo carries no EXIF (Pillow problem)"
+    out = clean_image(buf.getvalue(), "jpg")
+    if has_metadata(out.data, "jpg") or b"doctor-camera" in out.data:
+        return False, "EXIF was not removed"
+    return True, f"Pillow {Image.__version__}: EXIF/GPS scrubbing works"
+
+
 def cmd_doctor(cfg, args):
     from . import diar as diarmod
     from .notes import login_status
@@ -131,6 +182,16 @@ def cmd_doctor(cfg, args):
         _ok(False, "sherpa-onnx import (optional)", f"{type(e).__name__}: {e}", required=False)
     ok, detail = login_status(cfg)
     good &= _ok(ok, "claude login", detail if ok else detail + " (run `claude` interactively once and log in)")
+    if getattr(args, "no_model_call", False):
+        _ok(True, "notes model call", "skipped (--no-model-call)", required=False)
+    else:
+        ok, detail = model_check(cfg)
+        good &= _ok(ok, f"notes model {cfg.claude_model} (effort {cfg.claude_effort})", detail)
+    try:
+        ok, detail = photo_check()
+    except Exception as e:
+        ok, detail = False, f"{type(e).__name__}: {e}"
+    good &= _ok(ok, "photo handling (Pillow)", detail)
     cache_ok = os.access(cfg.cache_dir.parent if not cfg.cache_dir.exists() else cfg.cache_dir, os.W_OK)
     good &= _ok(cache_ok, "cache dir writable", str(cfg.cache_dir))
     print("\nall required checks passed" if good else "\nsome required checks FAILED")
@@ -187,7 +248,10 @@ def main(argv=None):
                         ("doctor", cmd_doctor, "check ffmpeg, models, claude login, token file, API"),
                         ("download-models", cmd_download_models, "download Whisper + diarization models"),
                         ("init-config", cmd_init_config, "write an example worker.toml")]:
-        sub.add_parser(name, help=h).set_defaults(fn=fn)
+        sp = sub.add_parser(name, help=h)
+        sp.set_defaults(fn=fn)
+        if name == "doctor":
+            sp.add_argument("--no-model-call", action="store_true", help="skip the tiny claude call that checks the notes model id")
     args = ap.parse_args(argv)
     logging.basicConfig(level=logging.DEBUG if args.verbose else logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s", stream=sys.stderr)
     try:

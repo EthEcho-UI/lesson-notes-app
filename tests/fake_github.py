@@ -228,7 +228,8 @@ class Ctl(BaseHTTPRequestHandler):
             elif p == "/__ctl/fault": ST.faults.append({"n": 1, **b})
             elif p == "/__ctl/clear_faults": ST.faults.clear()
             elif p == "/__ctl/put":   # simulate the worker / any writer: commit text files
-                ch = {k: (v.encode() if isinstance(v, str) else None) for k, v in b["files"].items()}
+                ch = {k: (v.encode() if isinstance(v, str) else None) for k, v in b.get("files", {}).items()}
+                for k, v in b.get("b64files", {}).items(): ch[k] = base64.b64decode(v) if v else None
                 if b["branch"] not in ST.refs: ST.refs.pop(b["branch"], None)
                 ST.commit_files(b["branch"], ch, b.get("message", "worker"))
             elif p == "/__ctl/delete_branch": ST.refs.pop(b["branch"], None)
@@ -248,6 +249,13 @@ class Ctl(BaseHTTPRequestHandler):
                         d = ST.blobs[s]
                         st[br][path] = d.decode() if path.endswith(".json") or path in ("README.md", ".keep") else {"bytes": len(d), "sha256": hashlib.sha256(d).hexdigest()}
                 return self.send(200, {"branches": st, "log": ST.log})
+        if p == "/__ctl/raw":   # raw bytes of one file: ?branch=main&path=notes/x/images/01.jpg
+            q = parse_qs(urlparse(self.path).query)
+            with ST.lock:
+                files = ST.files(q["branch"][0]) or {}
+                sha = files.get(q["path"][0])
+                if sha is None: return self.send(404, b"nf", "text/plain")
+                return self.send(200, ST.blobs[sha], "application/octet-stream")
         fp = os.path.normpath(os.path.join(ROOT, p.lstrip("/")))
         if p.endswith("/"): fp = os.path.join(fp, "index.html")
         if not fp.startswith(ROOT) or not os.path.isfile(fp): return self.send(404, b"nf", "text/plain")

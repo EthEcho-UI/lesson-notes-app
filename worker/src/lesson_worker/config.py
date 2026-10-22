@@ -29,8 +29,9 @@ class Config:
     models_dir: Path = field(default_factory=lambda: home() / ".local/share/lesson-notes/models")
     cache_dir: Path = field(default_factory=lambda: home() / ".cache/lesson-notes")
     claude_path: str = ""                      # empty: ~/.local/bin/claude, then PATH
-    claude_model: str = "sonnet"
-    claude_timeout_s: int = 900
+    claude_model: str = "claude-sonnet-5-5"
+    claude_effort: str = "high"                # --effort level for the notes call (low|medium|high|xhigh|max)
+    claude_timeout_s: int = 1800               # thinking + figures + photos take minutes
     claude_attempts: int = 2
     claude_retry_wait_s: float = 5.0           # pause between claude attempts (x6 after a rate limit)
     poll_interval_s: float = 20.0
@@ -38,7 +39,14 @@ class Config:
     whisper_model: str = "large-v3-turbo"
     whisper_repo: str = "mobiuslabsgmbh/faster-whisper-large-v3-turbo"
     whisper_threads: int = 8
-    whisper_initial_prompt: str = ""
+    whisper_initial_prompt: str = ""           # static text always passed to Whisper (before the per-note hint)
+    whisper_hint_mode: str = "hotwords"        # per-note context -> Whisper: hotwords (every window) | initial_prompt (first window only) | off
+    whisper_hint_chars: int = 400              # max length of the per-note vocabulary hint (~130-200 tokens)
+    mixed_first_pass: str = "auto"             # first decoding pass in language_mode=mixed: auto (language-id probe on 3 windows) | cs | en
+    mixed_check: str = "hybrid"                # mixed strategy: hybrid (forced pass + language-id on suspicious segments) | all (language-id on every segment)
+    mixed_min_logprob: float = -0.7            # hybrid: segments with avg_logprob below this get a language-id check
+    mixed_switch_prob: float = 0.6             # a segment switches language only if the detector gives the other cs/en language at least this probability
+    mixed_check_min_s: float = 1.0             # segments shorter than this are not checked (language-id is unreliable)
     whisper_idle_unload_s: float = 600.0
     diarize_threshold: float = 0.9
     diarize_threads: int = 4
@@ -47,6 +55,7 @@ class Config:
     retry_backoff_s: tuple = (60.0, 300.0, 900.0)
     failed_audio_retention_days: int = 14      # fallback when settings/app.json is unreadable
     cache_retention_days: int = 14
+    image_gc_interval_s: float = 3600.0        # how often the janitor looks for orphan photos on main
 
     def validate_paths(self):
         for k in ("token_file", "data_dir", "models_dir", "cache_dir"):
@@ -129,4 +138,9 @@ token_file = "~/.config/lesson-notes/token"      # fine-grained PAT, Contents re
 # claude_path = "/home/you/.local/bin/claude"     # default: ~/.local/bin/claude, then PATH
 # whisper_threads = 8
 # poll_interval_s = 20
+# claude_model = "claude-sonnet-5-5"              # notes model
+# claude_effort = "high"                          # thinking effort of the notes call
+# claude_timeout_s = 1800
+# whisper_hint_mode = "hotwords"                  # subject/topic/details -> Whisper vocabulary hint: hotwords | initial_prompt | off
+# whisper_hint_chars = 400
 """

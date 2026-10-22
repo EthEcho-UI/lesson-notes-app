@@ -10,6 +10,7 @@ import { recoverRecordings } from './recorder.js';
 import * as views from './views.js';
 import * as out from './outbox.js';
 import * as vault from './vault.js';
+import { removePrintRoot } from './exporters.js';
 
 const LS = 'lessonnotes.';
 const view = document.getElementById('view');
@@ -91,6 +92,7 @@ function route() {
   let m;
   if ((m = /^\/nb\/([^/]+)$/.exec(path))) return [views.notebookView, { id: m[1] }];
   if ((m = /^\/n\/([^/]+)\/add$/.exec(path))) return [views.composeView, { addTo: m[1] }];
+  if ((m = /^\/n\/([^/]+)\/edit$/.exec(path))) return [views.editView, { id: m[1] }];
   if ((m = /^\/n\/([^/]+)$/.exec(path))) return [views.noteView, { id: m[1] }];
   if (path === '/new') return [views.composeView, { nb: q.get('nb') }];
   if (path === '/search') return [views.searchView, {}];
@@ -99,6 +101,7 @@ function route() {
 }
 function mountRoute() {
   clear(view);
+  removePrintRoot();
   if (M.locked) { current = views.unlockView(view, ctx) || {}; renderNav(); return; }
   const [fn, args] = route();
   current = fn(view, args) || {};

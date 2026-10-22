@@ -1,0 +1,19 @@
+/* PDF export = browser print of #printRoot (built by exporters.js). A4, light colours, sensible breaks. */
+@page{size:A4;margin:16mm 15mm}
+@media print{
+  html,body{background:#fff!important;color:#000!important;font:11pt/1.45 "Liberation Sans",Arial,sans-serif}
+  .shell,.toast,dialog,.banners,noscript{display:none!important}
+  #printRoot{display:block!important;color:#000}
+  #printRoot h1,#printRoot h2,#printRoot h3{font-family:Georgia,"Liberation Serif",serif;color:#24463f;break-after:avoid;page-break-after:avoid}
+  #printRoot h1{font-size:22pt;margin:0 0 2mm}#printRoot h2{font-size:15pt;margin:7mm 0 2mm;border-bottom:.3mm solid #c9c2b0;padding-bottom:1mm}#printRoot h3{font-size:12pt;margin:4mm 0 1mm;color:#000}
+  .pr-meta{color:#555;font-size:9.5pt;margin:0 0 4mm}
+  #printRoot p{margin:0 0 2mm;orphans:3;widows:3}
+  .pr-list{margin:0 0 2mm;padding-left:6mm}.pr-list li{margin:0 0 .8mm;break-inside:avoid;page-break-inside:avoid}.pr-list li.lv1{margin-left:6mm}.pr-list li.lv2{margin-left:12mm}
+  .pr-task{margin-left:2mm}.pr-box{font-size:12pt}
+  .pr-qa{break-inside:avoid;page-break-inside:avoid;margin:0 0 3mm;padding-left:3mm;border-left:.8mm solid #c9c2b0}.pr-a{color:#333}
+  .pr-fig,.pr-photo{margin:0 0 5mm;break-inside:avoid;page-break-inside:avoid;text-align:center}
+  .pr-fig img{width:150mm;max-width:100%;max-height:120mm;height:auto;border:.2mm solid #ddd;background:#fff}
+  .pr-photo img{max-width:100%;max-height:200mm;height:auto}
+  .pr-fig figcaption,.pr-photo figcaption{font-size:9.5pt;color:#444;margin-top:1mm}
+  .pr-tr{font-size:9.5pt;margin:0 0 1.2mm!important}.pr-ts{color:#666}
+}

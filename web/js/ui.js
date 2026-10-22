@@ -30,6 +30,7 @@ const ICONS = {
   up: 'M12 19V5M6 11l6-6 6 6', down: 'M12 5v14M6 13l6 6 6-6', x: 'M6 6l12 12M18 6L6 18', plus: 'M12 5v14M5 12h14',
   back: 'M15 5l-7 7 7 7', play: 'M8 5v14l11-7z', pause: 'M8 5v14M16 5v14', stop: 'M7 7h10v10H7z', file: 'M6 3h8l4 4v14H6zM14 3v4h4', more: 'M5 12h.01M12 12h.01M19 12h.01',
   refresh: 'M20 12a8 8 0 1 1-3-6.2M20 4v5h-5', check: 'M5 12l5 5 9-10',
+  camera: 'M4 8h3l2-3h6l2 3h3v11H4zM12 11a3.5 3.5 0 1 0 0 7 3.5 3.5 0 0 0 0-7z', image: 'M4 5h16v14H4zM4 16l5-5 4 4 3-3 4 4M9 9h.01', download: 'M12 4v11M7 11l5 5 5-5M5 20h14',
 };
 export function icon(name) {
   const NS = 'http://www.w3.org/2000/svg';

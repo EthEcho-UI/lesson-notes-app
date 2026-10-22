@@ -37,11 +37,14 @@ The file must be mode 600 (the worker refuses to start otherwise: `chmod 600 ~/.
 | `repo` | `EthEcho-UI/lesson-notes-data` | data repo |
 | `token_file` | `~/.config/lesson-notes/token` | 0600 file |
 | `whisper_threads` | 8 | CPU threads for Whisper (benchmark used 12; lower = nicer to other jobs) |
-| `whisper_initial_prompt` | empty | optional vocabulary hint for Whisper |
+| `whisper_initial_prompt` | empty | static text always given to Whisper |
+| `whisper_hint_mode` / `whisper_hint_chars` | `hotwords` / 400 | per-note context (subject, topic, details) -> short vocabulary hint for Whisper: `hotwords` (applied to every 30 s window) \| `initial_prompt` (first window only) \| `off` |
+| `mixed_first_pass`, `mixed_check`, `mixed_min_logprob`, `mixed_switch_prob`, `mixed_check_min_s` | `auto`, `hybrid`, -0.7, 0.6, 1.0 | `language_mode=mixed` tuning, see "Languages" |
+| `image_gc_interval_s` | 3600 | how often orphan photos on main are removed |
 | `diarize_threshold` | 0.9 | speaker clustering threshold (higher = fewer speakers) |
 | `claude_path` | `~/.local/bin/claude`, then PATH | |
-| `claude_model` | `sonnet` | |
-| `claude_timeout_s` / `claude_attempts` | 900 / 2 | per call / bounded retries inside one try |
+| `claude_model` / `claude_effort` | `claude-sonnet-5-5` / `high` | notes model id and thinking effort (`doctor` makes one tiny call to prove the id works) |
+| `claude_timeout_s` / `claude_attempts` | 1800 / 2 | per call (thinking, photos) / bounded retries inside one try |
 | `poll_interval_s` | 20 | inbox poll (1 request, ETag/304) |
 | `max_attempts`, `retry_backoff_s` | 3, `[60, 300, 900]` | automatic retries per job |
 | `models_dir`, `cache_dir`, `data_dir` | `~/.local/share/lesson-notes/models`, `~/.cache/lesson-notes`, `~/.local/share/lesson-notes` | |
@@ -52,6 +55,12 @@ Settings that come from the repo (`settings/app.json`): `failed_audio_retention_
 `lesson-worker run` daemon loop | `once` process everything runnable and exit | `status` heartbeat + queue from GitHub |
 `doctor` checks ffmpeg, token file (mode 600), GitHub API (push permission), Whisper model, diarization models (optional), `claude auth status`, cache dir; exit 1 if a required check fails |
 `download-models` | `init-config`. `-v` for debug logs, `--config PATH` for another config.
+
+## Languages, context, photos (contract v2)
+- **Languages**: `language_mode` of the job: `cs`/`en` force that language; `mixed` = first pass in the dominant cs/en language (language-id probe on 3 windows), then segments that look suspicious (low confidence, or the text looks like the other language) get a language-id check on their audio; segments detected as the other of cs/en are re-decoded in it, segments detected as a third language are re-decoded in the dominant cs/en language (first guess kept in `lang_detected`). Every segment has `lang`. Measurements: `output/b7-REPORT.md`.
+- **Context -> Whisper**: subject/topic/details become a <= 400 char hint passed as `hotwords`; part of the ASR cache key. Notes get the full context.
+- **Photos**: `job.images[]` are fetched (inbox / main / laptop cache) and sha256-verified up front (`sha_mismatch`); in state `reading_images` Pillow validates them and removes EXIF/GPS/XMP/comments (lossless byte surgery; if an EXIF rotation exists the pixels are rotated first); the scrubbed copies go to the notes engine and, in the ONE completion commit, to `notes/<id>/images/NN.ext` (only photos still listed in note.json; orphans are deleted; `status.images_kept`). The inbox copies leave with the job. The worker never edits note.json.
+- **Old data**: v1 jobs are processed (v2 outputs); v1 transcripts get `lang: cs` when a part is appended; v1 notes are passed to the engine as `previous_notes`.
 
 ## Behaviour you can rely on
 - **Offline laptop / catch-up**: jobs never expire in the queue. On start and on resume from suspend the worker drops all caches and does a full scan,

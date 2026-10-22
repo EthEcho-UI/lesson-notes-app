@@ -110,6 +110,13 @@ export async function getBlobText(sha) {
   const r = await req('GET', `git/blobs/${sha}`);
   return b64ToUtf8(r.data.content);
 }
+export async function getBlobBytes(sha) {
+  const r = await req('GET', `git/blobs/${sha}`);
+  const bin = atob(r.data.content.replace(/\s/g, ''));
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  return bytes;
+}
 // content: string (utf8) | Blob. Throws HttpError 409/422 for sha conflicts.
 export async function putFile(path, branch, content, { sha, message, onProgress } = {}) {
   const b64 = typeof content === 'string' ? utf8ToB64(content) : await blobToB64(content);

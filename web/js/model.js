@@ -5,6 +5,7 @@ import { norm } from './util.js';
 export const M = {
   files: new Map(),        // repo path -> {sha, data, pending?}
   inbox: { exists: false, jobs: new Map(), bytes: 0, loaded: false }, // noteId -> {sha, job}
+  mainImages: new Map(),   // 'notes/<id>/images/NN.ext' -> git blob sha (from the main tree)
   uploads: [],             // local upload queue (IndexedDB 'uploads')
   outbox: [],              // pending small writes
   recs: [],                // local recordings
@@ -29,6 +30,7 @@ export async function loadAll() {
   M.uploads = uploads.sort((a, b) => a.created_at.localeCompare(b.created_at));
   M.outbox = outbox.sort((a, b) => a.seq - b.seq);
   M.recs = recs;
+  M.mainImages = new Map((await store.kvGet('mainImages')) || []);
   const inbox = await store.kvGet('inbox');
   if (inbox) { M.inbox.exists = inbox.exists; M.inbox.bytes = inbox.bytes; M.inbox.jobs = new Map(inbox.jobs); M.inbox.loaded = true; }
 }
@@ -75,6 +77,19 @@ export function getNote(id) {
   };
 }
 export const notesOf = (nbId) => allNotes().filter((n) => n.note.notebook_id === nbId);
+// ---- v2 helpers (readers default missing v2 data: contract "v2 changes") ----------------------------
+export const languageMode = (n) => n.note.language_mode || 'mixed';
+export const contextOf = (n) => {
+  const c = n.note.context || {};
+  const nb = notebook(n.note.notebook_id);
+  return { subject: c.subject || (nb ? nb.name : ''), topic: c.topic || '', details: c.details || '' };
+};
+export const noteImages = (n) => (n.note.images || []).filter((i) => i.status !== 'failed');
+export const isV2Notes = (n) => !!(n.notes && n.notes.schema_version === 2 && n.notes.content && Array.isArray(n.notes.content.outline));
+// notes older than the last context/photo/language edit
+export function inputsOutdated(n) {
+  return !!(n.notes && n.note.inputs_updated_at && n.notes.generated_at && n.note.inputs_updated_at > n.notes.generated_at);
+}
 export const heartbeat = () => data('worker/heartbeat.json');
 export const settings = () => data('settings/app.json');
 export const uploadFor = (noteId) => M.uploads.find((u) => u.note_id === noteId && u.step !== 'done') || null;
@@ -93,7 +108,7 @@ export function derive(n) {
     r.updating = hasResults;
     return r;
   }
-  if (n.note.parts.some((p) => p.status === 'uploading')) { r.code = 'upload_incomplete'; return r; }
+  if (n.note.parts.some((p) => p.status === 'uploading') || (n.note.images || []).some((i) => i.status === 'uploading')) { r.code = 'upload_incomplete'; return r; }
   if (job && job.job) {
     const jid = job.job.job_id;
     if (st && st.job_id === jid) return { ...r, ...fromStatus(st), updating: hasResults && st.state !== 'done' };
@@ -149,10 +164,15 @@ function buildIndex() {
     add('title', n.note.title);
     const c = n.notes && n.notes.content;
     if (c) {
-      add('notes', c.title); add('notes', c.summary);
-      for (const k of ['key_points', 'todo', 'questions_open', 'decisions']) (c[k] || []).forEach((t) => add('notes', t));
+      add('notes', c.title); add('notes', c.summary); add('notes', c.description);
+      for (const k of ['todo', 'questions_open', 'decisions', 'open_questions']) (c[k] || []).forEach((t) => add('notes', t));
+      for (const k of c.key_points || []) add('notes', typeof k === 'string' ? k : `${k.term || ''} ${k.text}`);
       (c.definitions || []).forEach((d) => add('notes', `${d.term}: ${d.definition}`));
       (c.action_items || []).forEach((a) => add('notes', `${a.task} ${a.owner || ''}`));
+      const walk = (pts) => (pts || []).forEach((p) => { if (typeof p === 'string') add('notes', p); else { add('notes', p.text); walk(p.children); } });
+      (c.outline || []).forEach((o) => { add('notes', o.heading); walk(o.points); });
+      (c.study_materials || []).concat(c.follow_up_materials || []).forEach((m) => add('notes', `${m.title} ${m.text} ${m.answer || ''}`));
+      (c.homework || []).forEach((hw) => add('notes', `${hw.task} ${hw.details || ''}`));
     }
     if (n.transcript) for (const p of n.transcript.parts) for (const s of p.segments) add('transcript', s.text, { partId: p.part_id, start: p.offset + s.start });
   }
@@ -176,36 +196,6 @@ export function search(q, limit = 60) {
   return out;
 }
 
-// ---- markdown export -------------------------------------------------------------------------------
-export function toMarkdown(n, labels, withTranscript = false, fmtTime = (s) => String(Math.round(s))) {
-  const L = labels;
-  const c = n.notes && n.notes.content;
-  const lines = [`# ${n.note.title}`, ''];
-  const nb = notebook(n.note.notebook_id);
-  lines.push(`*${nb ? nb.name + ' · ' : ''}${L.kind[n.note.kind]} · ${(n.note.recorded_at || n.note.created_at).slice(0, 10)}*`, '');
-  const list = (head, arr) => { if (arr && arr.length) { lines.push(`## ${head}`, ...arr.map((x) => `- ${x}`), ''); } };
-  if (c) {
-    if (c.summary) lines.push(`## ${L.summary}`, c.summary, '');
-    list(L.keyPoints, c.key_points);
-    if (c.definitions && c.definitions.length) lines.push(`## ${L.definitions}`, ...c.definitions.map((d) => `- **${d.term}**: ${d.definition}`), '');
-    list(L.decisions, c.decisions);
-    if (c.action_items && c.action_items.length) lines.push(`## ${L.actionItems}`, ...c.action_items.map((a) => `- ${a.task}${a.owner ? ` (${a.owner}${a.due ? ', ' + a.due : ''})` : a.due ? ` (${a.due})` : ''}`), '');
-    list(L.todo, c.todo);
-    list(L.questionsOpen, c.questions_open);
-  } else lines.push(L.noNotesYet, '');
-  if (withTranscript && n.transcript) {
-    lines.push(`## ${L.transcript}`, '');
-    for (const p of n.transcript.parts) {
-      lines.push(`### ${L.part} ${p.order}`, '');
-      for (const s of p.segments) {
-        const sp = s.speaker ? `**${speakerName(n, p.part_id, s.speaker)}**: ` : '';
-        lines.push(`[${fmtTime(s.start)}] ${sp}${s.text}`);
-      }
-      lines.push('');
-    }
-  }
-  return lines.join('\n').replace(/\n{3,}/g, '\n\n').trimEnd() + '\n';
-}
 // speakers.json (PWA-owned, single writer): names {"<part>:<label>"|"*:<label>": name}, merges {"<part>:<label>": "<target label>"}
 export function canonSpeaker(n, partId, label) {
   const mg = (n.speakers && n.speakers.merges) || {};

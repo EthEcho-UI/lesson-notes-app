@@ -142,7 +142,7 @@ def test_meeting_variant_has_decisions_and_actions(worker, cfg, gh):
     nt = main_json(f"notes/{j['note_id']}/notes.json")
     assert nt["kind"] == "meeting" and contract.problems("notes", nt) == []
     assert nt["content"]["decisions"] == ["rozhodnuti A"] and nt["content"]["action_items"][0]["owner"] == "Petra"
-    assert "porady" in Path(cfg.claude_path).parent.joinpath("last_stdin.txt").read_text()
+    assert "kind: meeting" in Path(cfg.claude_path).parent.joinpath("last_stdin.txt").read_text()
 
 
 def test_lesson_never_gets_meeting_fields(worker, cfg, gh):

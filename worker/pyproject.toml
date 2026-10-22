@@ -11,10 +11,14 @@ dependencies = [
   "numpy>=1.26,<3",
   "huggingface_hub>=0.25,<2",
   "jsonschema>=4.20,<5",
+  "pillow>=10,<13",
 ]
 
 [dependency-groups]
-dev = ["pytest>=8,<10"]
+dev = [
+    "jiwer>=4.0.0",
+    "pytest>=8,<10",
+]
 
 [project.scripts]
 lesson-worker = "lesson_worker.cli:main"

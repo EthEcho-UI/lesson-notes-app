@@ -8,6 +8,11 @@ import * as gh from './gh.js';
 import * as store from './store.js';
 import { Recorder, canRecord, freeRecs, deleteRec } from './recorder.js';
 import { ulid, fmtDuration, fmtBytes, fmtDate, fmtRelative, extFor, probeDuration } from './util.js';
+import { photosSection } from './photoui.js';
+import { renderNotes } from './notesview.js';
+import * as exporters from './exporters.js';
+import { langModeLabel } from './docmodel.js';
+import { MAX_IMAGES } from './images.js';
 
 const COLORS = ['#2e7d6b', '#b5563a', '#4a6fa5', '#8a6d3b', '#7b5ea7', '#a2495f', '#5c7a3a'];
 const go = (hash) => { location.hash = hash; };
@@ -123,9 +128,23 @@ export function notebookView(root, { id }) {
 }
 
 // ---- compose (new note / add parts) ---------------------------------------------------------------------
-const draft = { nb: '', kind: 'lesson', title: '', parts: [], diarize: null, busy: false };
+const newPh = (noteId = null, existing = []) => ({ photos: [], existing, removed: new Set(), captions: {}, noteId, busy: false });
+const draft = { nb: '', kind: 'lesson', title: '', parts: [], diarize: null, busy: false, languageMode: 'mixed', topic: '', details: '', ph: newPh() };
 let recorder = null;
-function resetDraft() { Object.assign(draft, { title: '', parts: [], diarize: null, busy: false }); }
+function resetDraft() { Object.assign(draft, { title: '', parts: [], diarize: null, busy: false, languageMode: 'mixed', topic: '', details: '', ph: newPh() }); }
+
+// language mode selector + topic + details (shared by the new-note form and the edit form)
+function contextFields(st, rerender, { subject } = {}) {
+  const left = h('small', { class: 'muted', id: 'detailsLeft' }, t('charsLeft', { n: 2000 - st.details.length }));
+  return h('section', { class: 'ctxform' },
+    h('div', { class: 'lbl' }, t('languageMode'), h('div', { class: 'seg', role: 'radiogroup', 'aria-label': t('languageMode') },
+      ['cs', 'en', 'mixed'].map((k) => h('button', { type: 'button', role: 'radio', 'aria-checked': st.languageMode === k ? 'true' : 'false', class: `segb ${st.languageMode === k ? 'on' : ''}`, id: `lm-${k}`, onclick: () => { st.languageMode = k; rerender(); } }, langModeLabel(k)))),
+      h('small', { class: 'muted' }, t('lmHint'))),
+    subject ? h('p', { class: 'muted subj' }, `${t('subject')}: `, h('strong', null, subject)) : null,
+    h('label', { class: 'lbl' }, t('topic'), h('input', { class: 'inp', id: 'topicIn', type: 'text', maxlength: 300, placeholder: t('topicPh'), value: st.topic, oninput: (e) => { st.topic = e.target.value; } })),
+    h('label', { class: 'lbl' }, t('details'), h('textarea', { class: 'inp ta', id: 'detailsIn', rows: 4, maxlength: 2000, placeholder: t('detailsPh'), oninput: (e) => { st.details = e.target.value; left.textContent = t('charsLeft', { n: 2000 - st.details.length }); } }, st.details),
+      h('small', { class: 'muted' }, t('aiHint')), left));
+}
 
 export function composeView(root, { addTo, nb: nbParam }) {
   const target = addTo ? model.getNote(addTo) : null;
@@ -168,6 +187,7 @@ export function composeView(root, { addTo, nb: nbParam }) {
     if (!target && !draft.title.trim()) return toast(t('needTitle'), 'bad');
     if (!nbId) return toast(t('needNotebook'), 'bad');
     if (!draft.parts.length) return toast(t('needParts'), 'bad');
+    if (draft.ph.busy) return;
     if (recorder && recorder.state !== 'idle') await stopRec();
     const s = model.settings();
     const block = s ? s.inbox_block_bytes : 943718400;
@@ -176,9 +196,12 @@ export function composeView(root, { addTo, nb: nbParam }) {
     try {
       const kind = target ? target.note.kind : draft.kind;
       const noteId = target ? target.id : ulid();
+      const nbRec = model.notebook(nbId);
+      const context = target ? model.contextOf(target) : { subject: (nbRec ? nbRec.name : '').slice(0, 200) || '-', topic: draft.topic.trim().slice(0, 300), details: draft.details.trim().slice(0, 2000) };
       await out.enqueueUpload({
         noteId, existing: !!target, notebookId: nbId, kind, title: target ? target.note.title : draft.title.trim(),
-        language: target ? target.note.language : (s && s.default_language) || 'cs', diarize: draft.diarize ?? diarizeFor(kind), parts: draft.parts,
+        languageMode: target ? model.languageMode(target) : draft.languageMode, context, diarize: draft.diarize ?? diarizeFor(kind), parts: draft.parts,
+        images: draft.ph.photos.map((p) => ({ ...p })),
       });
       resetDraft();
       go(`#/n/${noteId}`);
@@ -234,10 +257,12 @@ export function composeView(root, { addTo, nb: nbParam }) {
         h('div', { class: 'seg', role: 'radiogroup', 'aria-label': t('kind') },
           ['lesson', 'meeting'].map((k) => h('button', { type: 'button', role: 'radio', 'aria-checked': draft.kind === k ? 'true' : 'false', class: `segb ${draft.kind === k ? 'on' : ''}`, id: `kind-${k}`, onclick: () => { draft.kind = k; draft.diarize = null; render(); } }, k === 'lesson' ? t('kindLesson') : t('kindMeeting')))),
         h('label', { class: 'lbl' }, t('title'), h('input', { class: 'inp', id: 'titleIn', type: 'text', maxlength: 200, placeholder: t('titlePh'), value: draft.title, oninput: (e) => { draft.title = e.target.value; } })));
+      const nbSel = nbs.find((n) => n.id === draft.nb);
+      form.append(contextFields(draft, render, { subject: nbSel ? nbSel.name : '' }));
       const dz = draft.diarize ?? diarizeFor(draft.kind);
       form.append(h('label', { class: 'chk' }, h('input', { type: 'checkbox', id: 'diarizeIn', checked: dz, onchange: (e) => { draft.diarize = e.target.checked; } }), h('span', null, t('diarize'), h('small', { class: 'muted' }, ' ' + t('diarizeHint')))));
     } else form.append(h('p', { class: 'muted' }, `${target.note.title} · ${t('addPartsHint')}`));
-    form.append(partsEditor(),
+    form.append(partsEditor(), photosSection(draft.ph, render),
       h('div', { class: 'row end pad' }, h('button', { type: 'button', class: 'btn primary big', id: 'submitBtn', disabled: draft.busy, onclick: submit }, draft.busy ? t('preparing') : t('startUpload'))));
     root.append(pageHead(target ? t('addPartsTitle') : t('newNote'), iconBtn('back', t('back'), () => history.back())), banners(), form);
   }
@@ -256,6 +281,9 @@ export function noteView(root, { id }) {
     const d = model.derive(n);
     const back = iconBtn('back', t('back'), () => go(`#/nb/${n.note.notebook_id}`));
     root.append(pageHead(n.note.title, back), banners(), statusCard(n, d));
+    if (d.code === 'done' && model.inputsOutdated(n) && model.canAddParts(n)) {
+      root.append(h('div', { class: 'banner warn', id: 'outdatedBanner', role: 'status' }, h('span', null, t('outdated')), btn(t('regenerate'), () => doRegenerate(n), { cls: 'sm', attrs: { id: 'outdatedRegen' } })));
+    }
     const tabs = h('div', { class: 'tabs', role: 'tablist' }, [['notes', 'tabNotes'], ['transcript', 'tabTranscript'], ['audio', 'tabAudio']].map(([k, l]) =>
       h('button', { type: 'button', role: 'tab', id: `tab-${k}`, 'aria-selected': noteTab === k ? 'true' : 'false', class: `tab ${noteTab === k ? 'on' : ''}`, onclick: () => { noteTab = k; render(); } }, t(l))));
     root.append(tabs, h('div', { class: 'tabpanel', role: 'tabpanel' }, noteTab === 'notes' ? notesTab(n) : noteTab === 'transcript' ? transcriptTab(n) : audioTab(n, d)));
@@ -282,19 +310,7 @@ export function noteView(root, { id }) {
     }
     return c;
   }
-  function list(head, arr) {
-    if (!arr || !arr.length) return null;
-    return h('section', { class: 'blk' }, h('h2', null, head), h('ul', null, arr.map((x) => h('li', null, x))));
-  }
-  function notesTab(n) {
-    const c = n.notes && n.notes.content;
-    if (!c) return empty(t('noNotesYet'));
-    return h('div', { class: 'notes' }, c.summary ? h('section', { class: 'blk' }, h('h2', null, t('summary')), h('p', null, c.summary)) : null,
-      list(t('keyPoints'), c.key_points),
-      c.definitions && c.definitions.length ? h('section', { class: 'blk' }, h('h2', null, t('definitions')), h('dl', null, c.definitions.map((x) => [h('dt', null, x.term), h('dd', null, x.definition)]))) : null,
-      n.note.kind === 'meeting' ? [list(t('decisions'), c.decisions), c.action_items && c.action_items.length ? h('section', { class: 'blk' }, h('h2', null, t('actionItems')), h('ul', null, c.action_items.map((a) => h('li', null, a.task, (a.owner || a.due) ? h('span', { class: 'muted' }, ` (${[a.owner, a.due].filter(Boolean).join(', ')})`) : null)))) : null] : null,
-      list(t('todo'), c.todo), list(t('questionsOpen'), c.questions_open));
-  }
+  const notesTab = (n) => renderNotes(n);
   function transcriptTab(n) {
     if (!n.transcript) return empty(t('noTranscriptYet'));
     return h('div', { class: 'tr' }, n.transcript.parts.map((p) => h('section', { class: 'blk', id: `part-${p.part_id}` }, h('h2', null, `${t('part')} ${p.order}`, h('span', { class: 'muted' }, ` · ${fmtDuration(p.duration)}`)),
@@ -342,20 +358,38 @@ export function noteView(root, { id }) {
           h('td', null, t('partStatus_' + p.status)))))),
       st && st.audio ? h('p', null, `${t('audioState')}: ${t('audio_' + st.audio.state)}`) : null);
   }
+  async function doRegenerate(n) {
+    if (!(await confirmDialog(t('regenConfirm'), t('regenerateDo')))) return;
+    try { await out.regenerateNotes(n.id); toast(t('regenerateOk')); } catch (e) { toast(t('error', { msg: e.message }), 'bad'); }
+  }
+  function openExport(n0) {
+    return dialog((d, close) => {
+      const tr = h('input', { type: 'checkbox', id: 'exTr', checked: withTr, disabled: !n0.transcript, onchange: (e) => { withTr = e.target.checked; } });
+      const msg = h('p', { class: 'muted', id: 'exMsg', role: 'status' });
+      const run = async (fn) => {
+        const n = model.getNote(id) || n0;
+        msg.textContent = t('exporting');
+        try { await fn(n, { transcript: tr.checked && !!n.transcript }); msg.textContent = t('downloaded'); } catch (e) { console.warn('export failed', e); msg.textContent = t('error', { msg: e.message }); }
+      };
+      d.append(h('h2', null, t('exportTitle')), h('p', { class: 'hint' }, t('exportHint')),
+        h('label', { class: 'chk' }, tr, h('span', null, t('includeTranscript'))),
+        h('div', { class: 'exgrid' },
+          btn(t('exportDocx'), () => run(exporters.exportDocx), { ic: 'download', attrs: { id: 'exDocx' } }),
+          btn(t('exportPdf'), async () => { const n = model.getNote(id) || n0; const o = { transcript: tr.checked && !!n.transcript }; close(null); await exporters.exportPdf(n, o); }, { ic: 'file', attrs: { id: 'exPdf' } }),
+          btn(t('exportMdFile'), () => run(exporters.exportMd), { ic: 'download', attrs: { id: 'exMd' } }),
+          btn(t('exportCopy'), () => run(async (n, o) => { await navigator.clipboard.writeText(await exporters.toMarkdown(n, { ...o, figures: 'omit' })); }).then(() => { msg.textContent = t('copied'); }), { attrs: { id: 'exCopy' } })),
+        msg, h('div', { class: 'row end' }, btn(t('close'), () => close(null), { cls: 'ghost', attrs: { id: 'exClose' } })));
+    });
+  }
   function actions(n, d) {
     const row = h('div', { class: 'actions' });
     const can = model.canAddParts(n);
     row.append(btn(t('addParts'), () => go(`#/n/${id}/add`), { ic: 'plus', attrs: { id: 'addPartsBtn', disabled: !can, title: can ? '' : t('cannotAdd') } }));
-    if (can && n.transcript) row.append(btn(t('regenerate'), async () => { try { await out.regenerateNotes(id); toast(t('regenerateOk')); } catch (e) { toast(t('error', { msg: e.message }), 'bad'); } }, { attrs: { id: 'regenBtn' } }));
-    const md = () => model.toMarkdown(n, labels(), withTr, (s) => fmtDuration(s));
-    row.append(
-      h('label', { class: 'chk inline' }, h('input', { type: 'checkbox', id: 'withTr', checked: withTr, onchange: (e) => { withTr = e.target.checked; } }), h('span', null, t('withTranscript'))),
-      btn(t('copyMd'), async () => { try { await navigator.clipboard.writeText(md()); toast(t('copied')); } catch { toast(t('error', { msg: 'clipboard' }), 'bad'); } }, { attrs: { id: 'copyBtn' } }),
-      btn(t('exportMd'), () => {
-        const a = h('a', { href: URL.createObjectURL(new Blob([md()], { type: 'text/markdown' })), download: `${n.note.title.replace(/[^\p{L}\p{N}]+/gu, '-').slice(0, 60) || 'note'}.md` });
-        document.body.append(a); a.click(); a.remove(); toast(t('downloaded'));
-      }, { attrs: { id: 'exportBtn' } }));
-    if (navigator.share) row.append(btn(t('share'), () => navigator.share({ title: n.note.title, text: md() }).catch(() => {})));
+    const canEdit = can && !!n.transcript;
+    row.append(btn(t('editContext'), () => go(`#/n/${id}/edit`), { ic: 'camera', attrs: { id: 'editCtxBtn', disabled: !canEdit, title: canEdit ? '' : t('cannotEdit') } }));
+    if (can && n.transcript) row.append(btn(t('regenerate'), () => doRegenerate(n), { attrs: { id: 'regenBtn' } }));
+    row.append(btn(t('exportMenu'), () => openExport(n), { ic: 'download', cls: 'primary', attrs: { id: 'exportBtn' } }));
+    if (navigator.share) row.append(btn(t('share'), async () => navigator.share({ title: n.note.title, text: await exporters.toMarkdown(n, { figures: 'omit' }) }).catch(() => {})));
     row.append(btn(t('deleteNote'), async () => {
       if (!(await confirmDialog(t('deleteConfirm', { title: n.note.title }), t('delete')))) return;
       try { await out.deleteNote(id); toast(t('deleted')); go(`#/nb/${n.note.notebook_id}`); } catch (e) { toast(t('error', { msg: e.message }), 'bad'); }
@@ -364,6 +398,49 @@ export function noteView(root, { id }) {
   }
   render();
   return { update: render, activeNote: id };
+}
+
+// ---- edit context / photos of an existing note -------------------------------------------------------------------
+const editStates = new Map();
+export function editView(root, { id }) {
+  const n0 = model.getNote(id);
+  if (!n0) { root.append(empty(t('notFound'))); return {}; }
+  let st = editStates.get(id);
+  if (!st) {
+    const ctx = model.contextOf(n0);
+    st = { ...newPh(id, model.noteImages(n0)), languageMode: model.languageMode(n0), topic: ctx.topic, details: ctx.details, busy: false, saving: false };
+    editStates.set(id, st);
+  }
+  async function save() {
+    const n = model.getNote(id);
+    if (st.saving || st.busy) return;
+    if (!model.canAddParts(n) || !n.transcript) return toast(t('cannotEdit'), 'bad');
+    if (!(await confirmDialog(t('regenConfirm'), t('regenerateDo')))) return;
+    st.saving = true; render();
+    try {
+      const nb = model.notebook(n.note.notebook_id);
+      const captions = {};
+      for (const im of st.existing) if (!st.removed.has(im.id) && (st.captions[im.id] ?? im.caption ?? '') !== (im.caption || '')) captions[im.id] = st.captions[im.id].trim();
+      await out.enqueueUpload({
+        noteId: id, existing: true, notebookId: n.note.notebook_id, kind: n.note.kind, title: n.note.title, action: 'regenerate_notes', languageMode: st.languageMode,
+        context: { subject: (model.contextOf(n).subject || (nb && nb.name) || '-').slice(0, 200), topic: st.topic.trim().slice(0, 300), details: st.details.trim().slice(0, 2000) },
+        images: st.photos.map((p) => ({ ...p })), removeImages: [...st.removed], captions,
+      });
+      editStates.delete(id);
+      go(`#/n/${id}`);
+    } catch (e) { st.saving = false; render(); toast(t('error', { msg: e.message }), 'bad'); }
+  }
+  function render() {
+    clear(root);
+    const n = model.getNote(id);
+    const ok = n && model.canAddParts(n) && !!n.transcript;
+    root.append(pageHead(t('editTitle'), iconBtn('back', t('back'), () => history.back())), banners(), h('p', { class: 'muted' }, `${n0.note.title} · ${t('editHint')}`),
+      ...(ok ? [] : [h('p', { class: 'err' }, t('cannotEdit'))]),
+      h('div', { class: 'form' }, contextFields(st, render, { subject: model.contextOf(n0).subject }), photosSection(st, render),
+        h('div', { class: 'row end pad' }, h('button', { type: 'button', class: 'btn primary big', id: 'saveEditBtn', disabled: !ok || st.saving || st.busy, onclick: save }, st.saving ? t('preparing') : t('saveRegen')))));
+  }
+  render();
+  return { update: () => { /* keep typed input */ } };
 }
 
 // ---- search ----------------------------------------------------------------------------------------------------------

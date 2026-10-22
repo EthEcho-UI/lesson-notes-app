@@ -1,6 +1,7 @@
 """The worker engine: scan the inbox branch, process jobs one at a time (oldest first), write results to main.
 Safe to kill at any time: all outputs are idempotent (see CONTRACT section 3)."""
 import datetime as dt
+import hashlib
 import json
 import logging
 import re
@@ -9,17 +10,24 @@ import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from . import __version__, contract, diar as diarmod, transcript as tmod
+from . import __version__, contract, diar as diarmod, images as imgmod, notes_bridge, notes_final, transcript as tmod
 from .audio import AudioCorrupt, load_f32, to_wav16k, wav_duration
+from . import asr as asrmod
 from .cachestore import Cache
 from .clock import Clock, iso, parse_iso
 from .ghapi import ApiError, GitHub, NetworkError, blob_sha
-from .notes import NotesError, generate_notes
+from .notes import NotesError
 
 log = logging.getLogger("lesson_worker")
 
 ULID = "[0-9A-HJKMNP-TV-Z]{26}"
 MAX_COMPLETED = 20
+
+
+def _with_lang(segs, mode):
+    """Every segment carries `lang` (the ASR sets it in mixed mode; forced modes are filled in here)."""
+    default = mode if mode in ("cs", "en") else "cs"
+    return [dict(s, lang=s.get("lang") or default) for s in segs]
 
 
 class Fail(Exception):
@@ -52,6 +60,22 @@ class Job:
     def bytes(self):
         return sum(p["bytes"] for p in self.doc["parts"])
 
+    @property
+    def language_mode(self):
+        """v2: from the job. v1 jobs carried a forced language code: cs/en map to the same mode, anything else is detected."""
+        m = self.doc.get("language_mode")
+        if m:
+            return m
+        return self.doc.get("language", "cs") if self.doc.get("language", "cs") in ("cs", "en") else "mixed"
+
+    @property
+    def images(self):
+        return self.doc.get("images", [])
+
+    @property
+    def context(self):
+        return self.doc.get("context")
+
 
 @dataclass
 class Plan:
@@ -61,7 +85,7 @@ class Plan:
 
 
 class Worker:
-    def __init__(self, cfg, api: GitHub, clock=None, asr=None, notes=generate_notes, diarizer=diarmod.diarize):
+    def __init__(self, cfg, api: GitHub, clock=None, asr=None, notes=notes_bridge.call, diarizer=diarmod.diarize):
         self.cfg, self.api = cfg, api
         self.clock = clock or Clock()
         self.asr = asr
@@ -80,6 +104,7 @@ class Worker:
         self._last_hb = -1e9
         self._last_queue = {"jobs_pending": 0, "bytes_pending": 0, "oldest_job_created_at": None}
         self._last_status_write = -1e9
+        self._last_gc = -1e9
 
     # ------------------------------------------------------------------ scanning / planning
     def invalidate(self):
@@ -173,7 +198,7 @@ class Worker:
 
     def _new_status(self, job, state, prev=None, attempt=0, position=None):
         return {
-            "schema_version": 1, "note_id": job.note_id, "job_id": job.job_id, "action": job.doc["action"], "state": state,
+            "schema_version": 2, "note_id": job.note_id, "job_id": job.job_id, "action": job.doc["action"], "state": state,
             "queue_position": position, "queued_at": job.doc["created_at"], "started_at": None, "finished_at": None,
             "updated_at": self.clock.now_iso(), "worker_id": self.cfg.worker_id, "attempt": attempt,
             "max_attempts": self.cfg.max_attempts,
@@ -234,6 +259,7 @@ class Worker:
             self.finish_cleanup(j)
         self.sync_queue(plan.pending)
         self.janitor(plan.failed)
+        self.gc_images()
         runnable = [j for j in plan.pending if self.retry_after.get(j.job_id, 0) <= self.clock.mono()]
         if not runnable:
             self.heartbeat(force=False)
@@ -317,6 +343,7 @@ class Worker:
         try:
             if attempt > self.cfg.max_attempts:
                 raise Fail("attempts_exhausted", f"gave up after {self.cfg.max_attempts} interrupted or failed attempts", True, "transcribe")
+            self._load_images(job, st)
             if doc["action"] == "regenerate_notes":
                 self._regenerate(job, st)
             else:
@@ -344,6 +371,8 @@ class Worker:
             st.pop("progress", None)
         if state in ("transcribing", "diarizing"):
             st["_stage"] = "transcribe" if state == "transcribing" else "diarize"
+        elif state == "reading_images":
+            st["_stage"] = "read_images"
         elif state == "summarizing":
             st["_stage"] = "summarize"
         self._write_status(self._clean(st), throttle=throttle)
@@ -427,12 +456,131 @@ class Worker:
         except AudioCorrupt as e:
             raise Fail("audio_corrupt", str(e), False, "transcribe")
 
+    # ---- note/context helpers -------------------------------------------------------------------
+    def _json_file(self, path):
+        got = self.api.get_file(path)
+        if not got:
+            return None
+        try:
+            d = json.loads(got[0])
+            return d if isinstance(d, dict) else None
+        except ValueError:
+            return None
+
+    def _note_doc(self, note):
+        """note.json (PWA-owned, read-only for us) or None when absent/unreadable."""
+        return self._json_file(self._path(note, "note.json"))
+
+    def _notebook_name(self, note):
+        nd = self._note_doc(note) or {}
+        if not nd.get("notebook_id"):
+            return ""
+        return (self._json_file(f"notebooks/{nd['notebook_id']}.json") or {}).get("name", "")
+
+    def _context(self, job):
+        """Context snapshot of the job; v1 jobs fall back to note.json (v2) or the notebook name (v1 note)."""
+        if job.context:
+            return dict(job.context)
+        nd = self._note_doc(job.note_id) or {}
+        if nd.get("context"):
+            return dict(nd["context"])
+        subject = ""
+        if nd.get("notebook_id"):
+            nb = self._json_file(f"notebooks/{nd['notebook_id']}.json") or {}
+            subject = nb.get("name", "")
+        return {"subject": subject, "topic": "", "details": ""}
+
+    # ---- photos ---------------------------------------------------------------------------------
+    @staticmethod
+    def _listed_image_ids(note_doc):
+        if note_doc is None or "images" not in note_doc:
+            return None
+        return {i["id"] for i in note_doc["images"]}
+
+    def _image_bytes(self, job, im):
+        """Verified original bytes of one photo (inbox, main or laptop cache). Mismatch -> sha_mismatch."""
+        note, rel = job.note_id, im["file"]
+        ext = rel.rsplit(".", 1)[1]
+
+        def check(data, strict=True):
+            if hashlib.sha256(data).hexdigest() == im["sha256"] and len(data) == im["bytes"]:
+                return data
+            if not strict:
+                # the worker stores photos metadata-free; if that changed the bytes, accept what is already clean
+                try:
+                    if not imgmod.clean_image(data, ext).changed:
+                        return data
+                except imgmod.ImageError:
+                    pass
+            raise Fail("sha_mismatch", f"photo {im['id']} does not match job.json (bytes/sha256); re-upload the photo", True, "verify")
+
+        loc = im["location"]
+        if loc == "inbox":
+            ent = job.files.get(f"jobs/{note}/{rel}")
+            if ent is None:
+                raise Fail("part_missing", f"photo file {rel} is not on the inbox branch", True, "download")
+            if ent.get("size") and ent["size"] != im["bytes"]:
+                raise Fail("sha_mismatch", f"photo {im['id']} has {ent['size']} bytes on inbox, job.json says {im['bytes']}", True, "verify")
+            return check(self.api.blob(ent["sha"]))
+        if loc == "main":
+            got = self.api.get_file(f"notes/{note}/{rel}")
+            if got is None:
+                raise Fail("image_missing", f"photo {im['id']} is not stored with the note; remove or re-add it and regenerate", False, "download")
+            return check(got[0], strict=False)
+        src = self.cfg.local_audio_dir / note / rel
+        if not src.is_file():
+            raise Fail("image_missing", f"local photo {src} not found", False, "download")
+        return check(src.read_bytes())
+
+    def _load_images(self, job, st):
+        """Fetch + verify every photo of the job (fail fast, before the long transcription). Photos the user already
+        removed from note.json are skipped."""
+        loaded = []
+        if job.images:
+            listed = self._listed_image_ids(self._note_doc(job.note_id))
+            for im in sorted(job.images, key=lambda x: x["id"]):
+                if listed is not None and im["id"] not in listed:
+                    log.info("photo %s of note %s was removed from note.json; skipped", im["id"], job.note_id)
+                    continue
+                loaded.append({"spec": im, "raw": self._image_bytes(job, im)})
+        st["_img"] = loaded
+
+    def _prepare_images(self, job, st):
+        """reading_images stage: validate + scrub every photo, write the scrubbed copies for the notes engine.
+        Returns (shown, tmpdir) where shown = [{id,path,mime,width,height,bytes,caption?}]."""
+        if not job.images:
+            return [], None
+        self._check_stop(st)
+        self._emit(st, "reading_images")
+        tmp = Path(self.cfg.cache_dir) / "images" / job.job_id
+        shutil.rmtree(tmp, ignore_errors=True)
+        tmp.mkdir(parents=True, exist_ok=True)
+        shown = []
+        for it in st.get("_img", []):
+            spec = it["spec"]
+            ext = spec["file"].rsplit(".", 1)[1]
+            try:
+                ci = imgmod.clean_image(it["raw"], ext)
+            except imgmod.ImageError as e:
+                raise Fail("image_invalid", f"photo {spec['id']} cannot be used: {e}", False, "read_images")
+            it["clean"] = ci.data
+            path = tmp / f"{spec['id']}.{ext}"
+            path.write_bytes(ci.data)
+            path.chmod(0o600)
+            d = {"id": spec["id"], "path": str(path), "mime": ci.mime, "width": ci.width, "height": ci.height, "bytes": len(ci.data)}
+            if spec.get("caption"):
+                d["caption"] = spec["caption"]
+            shown.append(d)
+        return shown, tmp
+
     # ---- the transcribe pipeline ----------------------------------------------------------------
     def _transcribe_job(self, job, st):
         doc, note = job.doc, job.note_id
         parts = sorted(doc["parts"], key=lambda p: p["order"])
         n = len(parts)
-        lang = doc.get("language", "cs")
+        mode = job.language_mode
+        ctx = self._context(job)
+        hint = asrmod.build_hint(self.cfg, ctx)
         old = self._get_transcript(note) if doc["append"] else None
         if doc["append"] and old is None:
             raise Fail("append_without_transcript", "job appends to a note that has no transcript yet", False, "verify")
@@ -443,7 +591,8 @@ class Worker:
             self._check_stop(st)
             paths[p["id"]] = self._fetch_part(job, p)
 
-        asr_key = {"model": self.cfg.whisper_model, "language": lang, "prompt": self.cfg.whisper_initial_prompt}
+        asr_key = {"model": self.cfg.whisper_model, "language": mode, "prompt": self.cfg.whisper_initial_prompt, "hint": hint,
+                   "hint_mode": self.cfg.whisper_hint_mode if hint else "off", "mixed": asrmod.mixed_key(self.cfg) if mode == "mixed" else None}
         results = {}
         for i, p in enumerate(parts, 1):
             self._check_stop(st)
@@ -457,12 +606,12 @@ class Worker:
                     self._check_stop(st)
                     self._emit(st, "transcribing", i, n, p["id"], pc, throttle=True)
                 try:
-                    segs = self.asr.transcribe(audio, dur, lang, prog)
+                    segs = self.asr.transcribe(audio, dur, mode, prog, hint=hint) if hint else self.asr.transcribe(audio, dur, mode, prog)
                 except (Stopped, ApiError, NetworkError):
                     raise
                 except Exception as e:
                     raise Fail("transcribe_failed", f"{type(e).__name__}: {e}"[:500], True, "transcribe", auto_retry=True)
-                c = {"key": asr_key, "duration": round(dur, 2), "segments": segs, "transcribed_at": self.clock.now_iso()}
+                c = {"key": asr_key, "duration": round(dur, 2), "segments": _with_lang(segs, mode), "transcribed_at": self.clock.now_iso()}
                 self.cache.write_json(p["sha256"], "asr.json", c)
             results[p["id"]] = c
             sp = next(x for x in st["parts"] if x["part_id"] == p["id"])
@@ -482,10 +631,10 @@ class Worker:
         diar_info = {"enabled": bool(diarized or (old and old["diarization"]["enabled"]))}
         if diar_info["enabled"]:
             diar_info.update(engine="sherpa-onnx pyannote-segmentation-3.0 + 3D-Speaker CAM++", speaker_scope="per_part")
-        tr = tmod.build(note, lang, engine, diar_info, old, new_parts, self.clock.now_iso())
+        tr = tmod.build(note, mode, engine, diar_info, old, new_parts, self.clock.now_iso())
         if not any(p["segments"] for p in tr["parts"]):
             raise Fail("no_speech", "no speech was recognised in the audio", False, "transcribe")
-        self._summarize_and_commit(job, st, tr)
+        self._summarize_and_commit(job, st, tr, ctx)
 
     def _diarize_parts(self, job, st, parts, results):
         n = len(parts)
@@ -528,22 +677,40 @@ class Worker:
             return None
 
     def _regenerate(self, job, st):
-        tr = self._get_transcript(job.note_id)
-        if tr is None:
+        old = self._get_transcript(job.note_id)
+        if old is None:
             raise Fail("no_transcript", "regenerate_notes needs an existing transcript", False, "summarize")
-        tr = tmod.build(job.note_id, tr["language"], tr["engine"], tr["diarization"], tr, [], self.clock.now_iso())
-        self._summarize_and_commit(job, st, tr)
+        was_v1 = old.get("schema_version", 1) == 1
+        # the transcript keeps the language mode it was decoded with; the audio is gone, so a new mode cannot change it
+        tr = tmod.build(job.note_id, old.get("language_mode", "cs"), old["engine"], old["diarization"], old, [], old["updated_at"])
+        self._summarize_and_commit(job, st, tr, self._context(job), write_transcript=was_v1)
 
-    def _summarize_and_commit(self, job, st, tr):
+    def _previous_notes(self, note):
+        d = self._json_file(self._path(note, "notes.json"))
+        return d if d and isinstance(d.get("content"), dict) else None
+
+    def _summarize_and_commit(self, job, st, tr, ctx, write_transcript=True):
         note = job.note_id
-        self._check_stop(st)
-        self._emit(st, "summarizing")
+        shown, tmp = self._prepare_images(job, st)
         try:
-            content, model = self.notes(self.cfg, job.doc["kind"], tr["merged"]["text"])
-        except NotesError as e:
-            raise Fail(e.code, e.message, e.retryable, "summarize", auto_retry=e.auto_retry or e.code in ("claude_timeout", "claude_error", "claude_bad_output"))
-        notes_doc = {"schema_version": 1, "note_id": note, "kind": job.doc["kind"], "job_id": job.job_id, "generated_at": self.clock.now_iso(),
-                     "model": model, "based_on_parts": [p["part_id"] for p in tr["parts"]], "content": content}
+            self._check_stop(st)
+            self._emit(st, "summarizing")
+            usage = {}
+            try:
+                content, model = self.notes(self.cfg, transcript=tr, context=ctx, language_mode=job.language_mode, kind=job.doc["kind"],
+                                            images=shown, previous_notes=self._previous_notes(note), notebook_name=self._notebook_name(note),
+                                            usage=usage)
+            except NotesError as e:
+                raise Fail(e.code, e.message, e.retryable, "summarize", auto_retry=e.auto_retry or e.code in ("claude_timeout", "claude_error", "claude_bad_output"))
+        finally:
+            if tmp is not None:
+                shutil.rmtree(tmp, ignore_errors=True)
+        content = notes_final.finalize(content, job.doc["kind"])
+        notes_doc = {"schema_version": 2, "note_id": note, "kind": job.doc["kind"], "job_id": job.job_id, "generated_at": self.clock.now_iso(),
+                     "model": model, "based_on_parts": [p["part_id"] for p in tr["parts"]], "language": "cs",
+                     "based_on_images": usage.get("images_used", [d["id"] for d in shown]), "content": content}
+        if usage.get("images_skipped"):
+            log.warning("notes engine could not read photos: %s", usage["images_skipped"])
         done = self._clean(st)
         done.pop("progress", None)
         now = self.clock.now_iso()
@@ -552,11 +719,15 @@ class Worker:
         for sp in done["parts"]:
             if sp["state"] == "pending":
                 sp["state"] = "transcribed"
+        image_changes, kept = self._image_changes(job, st)
+        done["images_kept"] = kept
         contract.check("transcript", tr)
         contract.check("notes", notes_doc)
         contract.check("status", done)
-        files = {self._path(note, "transcript.json"): contract.dumps(tr), self._path(note, "notes.json"): contract.dumps(notes_doc),
-                 self._path(note, "status.json"): contract.dumps(done)}
+        files = {self._path(note, "notes.json"): contract.dumps(notes_doc), self._path(note, "status.json"): contract.dumps(done)}
+        if write_transcript:
+            files[self._path(note, "transcript.json")] = contract.dumps(tr)
+        files.update(image_changes)
         self.api.commit_files("main", files, f"note {note}: done")       # THE commit point
         self._status[note] = (blob_sha(files[self._path(note, "status.json")]), done, True)
         log.info("job %s done", job.job_id)
@@ -564,6 +735,39 @@ class Worker:
         for p in job.doc["parts"]:
             self.cache.drop(p["sha256"])
         self.finish_cleanup(job)
+
+    def _image_changes(self, job, st):
+        """Files to add/delete under notes/<id>/images/ in the completion commit and the resulting images_kept ids.
+        Copies `inbox` photos that note.json still lists (re-read now: the user may have deleted one meanwhile),
+        deletes orphans (files note.json no longer lists). Without a readable note.json nothing is deleted."""
+        note = job.note_id
+        prefix = f"notes/{note}/images/"
+        main = self.api.tree("main") or {}
+        present = {p: e for p, e in main.items() if p.startswith(prefix)}
+        nd = self._note_doc(note)
+        listed = self._listed_image_ids(nd)
+        changes = {}
+        for it in st.get("_img", []):
+            spec = it["spec"]
+            if spec["location"] != "inbox" or (listed is not None and spec["id"] not in listed):
+                continue
+            path = f"notes/{note}/{spec['file']}"
+            data = it.get("clean")
+            if data is None:                                     # job without reading_images stage data (cannot happen) - be safe
+                data = imgmod.clean_image(it["raw"], spec["file"].rsplit(".", 1)[1]).data
+            if path not in present or present[path]["sha"] != blob_sha(data):
+                changes[path] = data
+        after = (set(present) | set(changes))
+        if nd is not None and "images" in nd:
+            listed_paths = {prefix + i["filename"] for i in nd["images"]}
+            for p in sorted(after - listed_paths):
+                if p in present:
+                    changes[p] = None
+                else:
+                    changes.pop(p, None)
+                after.discard(p)
+        kept = sorted({f"i{p.rsplit('/', 1)[1].split('.')[0]}" for p in after})
+        return changes, kept
 
     # ------------------------------------------------------------------ audio removal / janitor
     def _remove_job_audio(self, job):
@@ -573,7 +777,10 @@ class Worker:
             base = self.cfg.local_audio_dir / job.note_id
             for p in job.doc["parts"]:
                 (base / p["file"]).unlink(missing_ok=True)
-            for d in (base / "parts", base):
+            for im in job.images:
+                if im["location"] == "local":
+                    (base / im["file"]).unlink(missing_ok=True)
+            for d in (base / "images", base / "parts", base):
                 try:
                     d.rmdir()                    # only if empty
                 except OSError:
@@ -585,7 +792,8 @@ class Worker:
         tree = self.api.tree("inbox") or {}
         jpath = f"jobs/{job.note_id}/job.json"
         cur = tree.get(jpath)
-        mine = {jpath} | {f"jobs/{job.note_id}/{p['file']}" for p in job.doc["parts"]}
+        mine = {jpath} | {f"jobs/{job.note_id}/{p['file']}" for p in job.doc["parts"]} \
+            | {f"jobs/{job.note_id}/{i['file']}" for i in job.images if i["location"] == "inbox"}
         if cur is not None:
             try:
                 cur_doc = json.loads(self.api.blob(cur["sha"]))
@@ -595,7 +803,8 @@ class Worker:
                 # job.json now belongs to a newer job (pinned-job rule): keep it, and keep every file that job still
                 # references; only our own, now unreferenced part files may go.
                 log.info("job.json of note %s belongs to a newer job; removing only this job's unreferenced parts", job.note_id)
-                theirs = {f"jobs/{job.note_id}/{p['file']}" for p in cur_doc.get("parts", [])}
+                theirs = {f"jobs/{job.note_id}/{p['file']}" for p in cur_doc.get("parts", [])} \
+                    | {f"jobs/{job.note_id}/{i['file']}" for i in cur_doc.get("images", []) if i.get("location") == "inbox"}
                 mine = (mine - {jpath}) - theirs
         gone = {p for p in tree if p in mine}
         if not gone:
@@ -638,3 +847,24 @@ class Worker:
                 self._write_status(st)
                 for p in j.doc["parts"]:
                     self.cache.drop(p["sha256"])
+
+    def gc_images(self, force=False):
+        """Photos on main that note.json no longer lists are deleted in every completion commit; this pass catches notes
+        that are never regenerated. Only acts when note.json is readable and has an images list."""
+        if not force and self.clock.mono() - self._last_gc < self.cfg.image_gc_interval_s:
+            return
+        self._last_gc = self.clock.mono()
+        by_note = {}
+        for path in (self.api.tree("main") or {}):
+            m = re.fullmatch(rf"notes/({ULID})/images/\d\d\.(?:jpg|png|webp)", path)
+            if m:
+                by_note.setdefault(m.group(1), set()).add(path)
+        for note, paths in by_note.items():
+            nd = self._note_doc(note)
+            if nd is None or "images" not in nd:
+                continue
+            listed = {f"notes/{note}/images/{i['filename']}" for i in nd["images"]}
+            orphans = sorted(paths - listed)
+            if orphans:
+                log.info("removing %d unused photo(s) of note %s", len(orphans), note)
+                self.api.commit_files("main", {p: None for p in orphans}, f"note {note}: remove unused photos")

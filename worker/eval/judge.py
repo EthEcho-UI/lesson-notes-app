@@ -1,9 +1,17 @@
 #!/usr/bin/env python
-"""Independent judge for eval outputs: a different model (claude-opus-5-5) compares the generated notes with the transcript (+photos)
+"""Independent judge for eval outputs: a different model compares the generated notes with the transcript (+photos)
 and lists unsupported claims, missed important content, mistakes, and scores. NOT ground truth (LLM judge, can miss things or flag
 correct things): REVIEW.md combines it with manual reading.
-  python eval/judge.py <variant> [input-prefix ...]"""
+  python eval/judge.py <variant> [input-prefix ...]
+
+COST GUARD: every run is a paid model call. The judge model/effort come from LESSON_EVAL_JUDGE_MODEL / LESSON_EVAL_JUDGE_EFFORT
+(default claude-sonnet-5-5 / medium, NOT Opus) and the script refuses to run unless LESSON_EVAL_ALLOW_PAID=1 is set."""
 import base64, json, os, subprocess, sys, tempfile
+
+JUDGE_MODEL = os.environ.get("LESSON_EVAL_JUDGE_MODEL", "claude-sonnet-5-5")
+JUDGE_EFFORT = os.environ.get("LESSON_EVAL_JUDGE_EFFORT", "medium")
+if os.environ.get("LESSON_EVAL_ALLOW_PAID") != "1":
+    sys.exit("judge.py makes paid model calls; set LESSON_EVAL_ALLOW_PAID=1 to run it (default model %s, effort %s)." % (JUDGE_MODEL, JUDGE_EFFORT))
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor
 HERE = Path(__file__).resolve().parent
@@ -37,7 +45,7 @@ def judge(variant, name):
     blocks.append({"type": "text", "text": "<generated_notes>\n" + json.dumps(notes, ensure_ascii=False) + "\n</generated_notes>\nReview now."})
     stdin = json.dumps({"type": "user", "message": {"role": "user", "content": blocks}}, ensure_ascii=False) + "\n"
     with tempfile.TemporaryDirectory() as cwd:
-        r = subprocess.run([os.path.expanduser("~/.local/bin/claude"), "-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose", "--model", "claude-opus-5-5", "--effort", "high",
+        r = subprocess.run([os.path.expanduser("~/.local/bin/claude"), "-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose", "--model", JUDGE_MODEL, "--effort", JUDGE_EFFORT,
                             "--tools", "", "--setting-sources", "project", "--strict-mcp-config", "--disable-slash-commands", "--no-session-persistence", "--system-prompt", SYSTEM,
                             "--json-schema", json.dumps(SCHEMA)], input=stdin, capture_output=True, text=True, cwd=cwd, timeout=1500, env={"HOME": os.environ["HOME"], "PATH": "/usr/bin:/bin"})
     ev = [json.loads(l) for l in r.stdout.splitlines() if l.startswith("{")]

@@ -50,12 +50,29 @@ PER_ELEMENT = {
 SAFE_FONTS = {"sans-serif", "serif", "monospace", "arial", "helvetica", "dejavu sans",
               "liberation sans", "noto sans"}
 
-NUM = r"-?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?"
+NUM = r"-?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][-+]?\d+)?"   # no nested/overlapping quantifiers (ReDoS safe)
 RE_LEN = re.compile(rf"^{NUM}(?:px|%|em|pt)?$")
-RE_NUMLIST = re.compile(rf"^(?:{NUM}[\s,]*)+$")
+RE_NUM_FULL = re.compile(rf"^{NUM}$")
+RE_TRANSFORM_PART = re.compile(r"\s*(?:translate|scale|rotate|skewX|skewY|matrix)\(([^()]*)\)\s*")
+MAX_LIST_ITEMS = 600
+
+
+def numlist_ok(v):
+    """Whitespace/comma separated numbers, linear time (no regex over the whole list: that backtracks catastrophically)."""
+    toks = [t for t in re.split(r"[\s,]+", re.sub(r"([\d.])-", r"\1 -", v)) if t]    # '10-5' is two numbers
+    return 0 < len(toks) <= MAX_LIST_ITEMS and all(RE_NUM_FULL.match(t) for t in toks)
+
+
+def transform_ok(v):
+    pos, n = 0, 0
+    while pos < len(v):
+        m = RE_TRANSFORM_PART.match(v, pos)
+        if not m or not numlist_ok(m.group(1)) or n >= 20:
+            return False
+        pos, n = m.end(), n + 1
+    return n > 0
 RE_VIEWBOX = re.compile(rf"^{NUM}[\s,]+{NUM}[\s,]+{NUM}[\s,]+{NUM}$")
 RE_PATH = re.compile(r"^[MmLlHhVvCcSsQqTtAaZz0-9eE\s,.+-]*$")
-RE_TRANSFORM = re.compile(rf"^(?:(?:translate|scale|rotate|skewX|skewY|matrix)\(\s*(?:{NUM}[\s,]*)+\)\s*)+$")
 RE_COLOR = re.compile(r"^(?:none|currentColor|#[0-9a-fA-F]{3,8}|[a-zA-Z]{3,20}|"
                       r"rgba?\(\s*[\d.%\s,]+\))$")
 RE_ID = re.compile(r"^[A-Za-z][A-Za-z0-9_-]{0,40}$")
@@ -103,9 +120,9 @@ def _attr_problem(el, name, value):
     if name == "d":
         return None if RE_PATH.match(v) else "bad path data"
     if name == "points":
-        return None if RE_NUMLIST.match(v) else "bad points"
+        return None if numlist_ok(v) else "bad points"
     if name == "transform":
-        return None if RE_TRANSFORM.match(v) else "bad transform"
+        return None if transform_ok(v) else "bad transform"
     if name in COLOR_ATTRS:
         return None if RE_COLOR.match(v) else "bad color"
     if name in MARKER_ATTRS:
@@ -113,7 +130,7 @@ def _attr_problem(el, name, value):
     if name in NUM_ATTRS:
         return None if RE_LEN.match(v) else "bad number"
     if name == "stroke-dasharray":
-        return None if (v == "none" or RE_NUMLIST.match(v)) else "bad dasharray"
+        return None if (v == "none" or numlist_ok(v)) else "bad dasharray"
     if name == "orient":
         return None if (v in ("auto", "auto-start-reverse") or RE_LEN.match(v)) else "bad orient"
     if name == "font-family":

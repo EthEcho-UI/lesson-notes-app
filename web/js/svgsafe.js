@@ -17,12 +17,28 @@ const PER_ELEMENT = {
 };
 const SAFE_FONTS = new Set(['sans-serif', 'serif', 'monospace', 'arial', 'helvetica', 'dejavu sans', 'liberation sans', 'noto sans']);
 
-const NUM = '-?(?:\\d+\\.?\\d*|\\.\\d+)(?:[eE][-+]?\\d+)?';
+const NUM = '-?(?:\\d+(?:\\.\\d*)?|\\.\\d+)(?:[eE][-+]?\\d+)?'; // no nested/overlapping quantifiers (ReDoS safe)
 const RE_LEN = new RegExp(`^${NUM}(?:px|%|em|pt)?$`);
-const RE_NUMLIST = new RegExp(`^(?:${NUM}[\\s,]*)+$`);
+const RE_NUM_FULL = new RegExp(`^${NUM}$`);
+const RE_TRANSFORM_PART = /\s*(?:translate|scale|rotate|skewX|skewY|matrix)\(([^()]*)\)\s*/y;
+const MAX_LIST_ITEMS = 600;
+// whitespace/comma separated numbers in linear time (a regex over the whole list backtracks catastrophically)
+function numlistOk(v) {
+  const toks = v.replace(/([\d.])-/g, '$1 -').split(/[\s,]+/).filter(Boolean);   // '10-5' is two numbers
+  return toks.length > 0 && toks.length <= MAX_LIST_ITEMS && toks.every((t) => RE_NUM_FULL.test(t));
+}
+function transformOk(v) {
+  let pos = 0; let n = 0;
+  while (pos < v.length) {
+    RE_TRANSFORM_PART.lastIndex = pos;
+    const m = RE_TRANSFORM_PART.exec(v);
+    if (!m || !numlistOk(m[1]) || n >= 20) return false;
+    pos = RE_TRANSFORM_PART.lastIndex; n += 1;
+  }
+  return n > 0;
+}
 const RE_VIEWBOX = new RegExp(`^${NUM}[\\s,]+${NUM}[\\s,]+${NUM}[\\s,]+${NUM}$`);
 const RE_PATH = /^[MmLlHhVvCcSsQqTtAaZz0-9eE\s,.+-]*$/;
-const RE_TRANSFORM = new RegExp(`^(?:(?:translate|scale|rotate|skewX|skewY|matrix)\\(\\s*(?:${NUM}[\\s,]*)+\\)\\s*)+$`);
 const RE_COLOR = /^(?:none|currentColor|#[0-9a-fA-F]{3,8}|[a-zA-Z]{3,20}|rgba?\(\s*[\d.%\s,]+\))$/;
 const RE_ID = /^[A-Za-z][A-Za-z0-9_-]{0,40}$/;
 const RE_URLREF = /^url\(#([A-Za-z][A-Za-z0-9_-]{0,40})\)$/;
@@ -47,12 +63,12 @@ function attrProblem(el, name, value, nsUri) {
   if (name === 'id') return RE_ID.test(v) ? null : 'bad id';
   if (name === 'viewBox') return RE_VIEWBOX.test(v) ? null : 'bad viewBox';
   if (name === 'd') return RE_PATH.test(v) ? null : 'bad path data';
-  if (name === 'points') return RE_NUMLIST.test(v) ? null : 'bad points';
-  if (name === 'transform') return RE_TRANSFORM.test(v) ? null : 'bad transform';
+  if (name === 'points') return numlistOk(v) ? null : 'bad points';
+  if (name === 'transform') return transformOk(v) ? null : 'bad transform';
   if (COLOR_ATTRS.has(name)) return RE_COLOR.test(v) ? null : 'bad color';
   if (MARKER_ATTRS.has(name)) return (v === 'none' || RE_URLREF.test(v)) ? null : 'bad marker ref';
   if (NUM_ATTRS.has(name)) return RE_LEN.test(v) ? null : 'bad number';
-  if (name === 'stroke-dasharray') return (v === 'none' || RE_NUMLIST.test(v)) ? null : 'bad dasharray';
+  if (name === 'stroke-dasharray') return (v === 'none' || numlistOk(v)) ? null : 'bad dasharray';
   if (name === 'orient') return (v === 'auto' || v === 'auto-start-reverse' || RE_LEN.test(v)) ? null : 'bad orient';
   if (name === 'font-family') {
     const fonts = v.split(',').map((f) => f.trim().replace(/^['"]+|['"]+$/g, '').toLowerCase());

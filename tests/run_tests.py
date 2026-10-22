@@ -669,6 +669,17 @@ def test_svg_vectors(pw):
         for n in ("not_xml", "doctype_entity", "wrong_root", "no_viewbox", "too_big"):
             assert next(r for r in res if r["name"] == n)["san"] is None, n
         assert not svg_noise_ok(c), c.problems
+        # security review: adversarial number lists/transforms must be rejected in (near) linear time, not hang the tab
+        slow = p.evaluate("""async () => {
+          const m = await import('./js/svgsafe.js'); const res = [];
+          for (const [attr, val] of [['points', '1'.repeat(3900) + 'x'], ['stroke-dasharray', '1.'.repeat(1900) + 'x'], ['transform', 'translate(' + '1'.repeat(3900) + 'x)']]) {
+            const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"><polyline ${attr}="${val}" fill="none" stroke="#000"/></svg>`;
+            const t0 = performance.now(); m.sanitize(svg); res.push([attr, performance.now() - t0]);
+          }
+          const ok = m.sanitize('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><polyline points="10,10 20-5 30 40.5" transform="translate(5 5) scale(1.5)" stroke-dasharray="4 2" fill="none" stroke="#000"/></svg>');
+          return {res, ok: !!ok.svg}; }""")
+        assert all(ms < 1000 for _, ms in slow["res"]), slow
+        assert slow["ok"], "ordinary number lists must still be accepted"
     finally: c.close()
 
 # ---- new-note form, photo resize, upload order -----------------------------------------------------------------------

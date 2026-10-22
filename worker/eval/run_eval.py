@@ -81,6 +81,9 @@ def one(inp, a, cfg, outdir):
 
 
 if __name__ == "__main__":
+    import os as _os, sys as _sys
+    if _os.environ.get("LESSON_EVAL_ALLOW_PAID") != "1":
+        _sys.exit("run_eval.py makes paid model calls (about $0.05-1.4 per input); set LESSON_EVAL_ALLOW_PAID=1 to run it.")
     ap = argparse.ArgumentParser()
     ap.add_argument("names", nargs="*")
     ap.add_argument("--variant", default="latest")

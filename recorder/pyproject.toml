@@ -4,6 +4,7 @@ version = "0.1.0"
 description = "Laptop recorder: records lessons/meetings (mic, or mic + system audio) and hands them to the lesson-notes worker"
 requires-python = ">=3.12,<3.13"
 dependencies = [
+  "pillow>=10,<13",         # photos: resize + EXIF strip (same limits as the contract)
   "lesson-worker",          # shares the GitHub client, config/token handling and contract validation
 ]
 

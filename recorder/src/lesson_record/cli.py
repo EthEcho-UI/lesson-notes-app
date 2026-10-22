@@ -34,7 +34,8 @@ def _print_last(last):
 def cmd_start(a, ctx):
     wcfg, rcfg, paths = ctx
     st = session.start(wcfg, rcfg, paths, kind=a.kind, mode=a.mode, notebook=a.notebook, title=a.title, note=a.note,
-                       language=a.language, diarize=a.diarize)
+                       language=a.language, diarize=a.diarize, language_mode=a.language_mode, topic=a.topic, details=a.details,
+                       images=a.image or [])
     for r in st.get("recovered_orphans") or []:
         print("recovered an interrupted earlier recording first:")
         _print_last(r)
@@ -139,6 +140,21 @@ def cmd_submit(a, ctx):
     return 0 if all(s in ("submitted", "waiting") for _, s, _ in res) else 1
 
 
+def cmd_note_edit(a, ctx):
+    from .noteedit import EditError, edit_note
+    wcfg, rcfg, paths = ctx
+    remote = Remote(wcfg, paths)
+    n = remote.find_note(a.note_id)
+    nb = next((x["name"] for x in remote.cached().get("notebooks", []) if n and x["id"] == n["notebook_id"]), None)
+    try:
+        print(edit_note(remote, a.note_id, language_mode=a.language_mode, topic=a.topic, details=a.details, add_images=a.image or [],
+                        remove_images=a.remove_image or [], notebook_name=nb))
+    except EditError as e:
+        print(f"error: {e}", file=sys.stderr)
+        return 1
+    return 0
+
+
 def cmd_ui(a, ctx):
     from .ui import serve, stop_running
     if a.stop:
@@ -156,7 +172,11 @@ def main(argv=None):
     s.add_argument("--notebook", help="notebook name or id (new notes)")
     s.add_argument("--title", help="note title (new notes)")
     s.add_argument("--note", help="existing note id: record another PART of that note")
-    s.add_argument("--language")
+    s.add_argument("--language", help=argparse.SUPPRESS)       # old spelling of --language-mode cs|en
+    s.add_argument("--language-mode", choices=["cs", "en", "mixed"], help="spoken language: cs, en or mixed (default: settings, else mixed); notes are always Czech")
+    s.add_argument("--topic", help="what the lesson/meeting is about (context for the notes)")
+    s.add_argument("--details", help="free text for the AI: terms, teacher, exam relevance (max 2000 characters)")
+    s.add_argument("--image", action="append", metavar="PATH", help="photo of the whiteboard/slides/notebook (repeatable, max 12 per note; resized to JPEG, EXIF removed)")
     s.add_argument("--diarize", action=argparse.BooleanOptionalAction, default=None, help="speaker labels (default: lesson no, meeting yes)")
     sub.add_parser("stop", help="stop, finalize and hand over to the worker")
     sub.add_parser("pause")
@@ -169,6 +189,13 @@ def main(argv=None):
     s.add_argument("--json", action="store_true")
     sub.add_parser("recover", help="turn recordings interrupted by a crash/power loss into parts")
     sub.add_parser("submit", help="retry the hand-off of finished recordings that could not be announced (offline)")
+    s = sub.add_parser("note-edit", help="change language mode / topic / details / photos of a note and regenerate its notes")
+    s.add_argument("note_id")
+    s.add_argument("--language-mode", choices=["cs", "en", "mixed"])
+    s.add_argument("--topic")
+    s.add_argument("--details")
+    s.add_argument("--image", action="append", metavar="PATH", help="add a photo (repeatable)")
+    s.add_argument("--remove-image", action="append", metavar="iNN", help="remove a photo from the note (repeatable)")
     s = sub.add_parser("ui", help="local web UI on 127.0.0.1")
     s.add_argument("--port", type=int, default=0, help="default: a free port")
     s.add_argument("--no-browser", action="store_true")

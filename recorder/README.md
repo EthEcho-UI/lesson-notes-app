@@ -21,7 +21,8 @@ uv sync                 # installs lesson-record and the worker package (shared 
 .venv/bin/lesson-record status
 ```
 Optional `~/.config/lesson-notes/recorder.toml`: `part_minutes = 75` (a longer recording is split into several parts), `bitrate = "24k"`,
-`mic_source = ""` (pulse source name; empty = follow the default input), `silent_warn_s = 10`, `silent_db = -60`, `language = "cs"`.
+`mic_source = ""` (pulse source name; empty = follow the default input), `silent_warn_s = 10`, `silent_db = -60`, `language_mode = "mixed"`
+(default spoken-language mode for new notes; the repo's `settings/app.json` `default_language_mode` wins when present; the old `language` key is accepted and ignored).
 
 ## Use
 ```bash
@@ -29,6 +30,8 @@ lesson-record start --kind lesson  --notebook "Biologie 2.A" --title "Mitosis"  
 lesson-record start --kind meeting --notebook "Work" --title "Weekly"              # mic + system audio (default mode for meetings)
 lesson-record start --mode meeting --kind lesson ...                               # override the capture mode
 lesson-record start --note <noteId>                                                # record ANOTHER PART of an existing note
+lesson-record start --language-mode mixed --topic "Mitosis" --details "profase, metafaze; test v patek" --image board.jpg --image slide.png
+lesson-record note-edit <noteId> --topic "..." --details "..." --language-mode cs --image extra.jpg --remove-image i02   # then the notes are regenerated
 lesson-record pause | resume | stop | status | list-notes | recover | submit
 lesson-record ui                                                                   # local web UI
 ```
@@ -37,8 +40,23 @@ lesson-record ui                                                                
 * Defaults per kind come from the contract: lesson -> diarize false, meeting -> true (override with `--diarize/--no-diarize`; the repo's
   `settings/app.json` `diarize_default` is honoured when present). Notebook, language and the notes list come from the data repo and are cached
   (`~/.local/state/lesson-notes/remote-cache.json`), so `start` works offline.
+* **Language and context (contract v2).** `--language-mode cs|en|mixed` is the language that is SPOKEN (notes are always Czech; default: settings, else
+  `mixed`). `--topic` (<= 300 chars), `--details` (<= 2000) and `--image PATH` (repeatable, max 12 per note) are context for the AI; the context
+  subject is the notebook name. Photos are re-encoded to a JPEG with long edge <= 1600 px and <= 600 KiB, EXIF/GPS removed (Pillow); anything
+  unreadable is refused before the recording starts. With `--note <id>` the note's own context is kept and only what you pass is changed
+  (new photos get the next free `iNN`).
+* `note-edit` edits note.json (language mode, topic, details, add/remove photos; a v1 note is upgraded to v2) and queues a `regenerate_notes` job
+  carrying the COMPLETE photo set (new photos on the inbox next to job.json, written in the same commit; kept ones as `main`). It refuses while the
+  note is not `done` or its previous job is still on the inbox.
 * `pause` releases the microphone; the paused time is not in the file. `list-notes` shows recent notes and their worker state.
 * State lives in `~/.local/state/lesson-notes/` (`recorder.json`, `outbox/`, `remote-cache.json`; mode 0700).
+
+### Hand-off format (v2)
+`note.json` v2 (`language_mode`, `context`, `images[]`, `inputs_updated_at`, `source: laptop`) is created/updated first, then `job.json` v2 last
+(`language_mode`, `context` snapshot, `images[]` = full set; photos of this recording are `location: local`, stored as
+`local/<noteId>/images/NN.jpg` next to the audio, because the contract forbids `inbox` photos in a local-audio job). The recorder never writes
+`notes/<id>/images/`. **Known gap:** the worker only copies `inbox` photos to the note (`_image_changes`), so photos recorded on the laptop are shown
+to the model but are not stored with the note unless the worker also copies `local` ones (or you re-add them with `note-edit --image`).
 
 ### Crash safety
 Audio is encoded continuously (Ogg Opus pages flushed every 0.2 s), so a crash, `kill -9` or power loss loses about a second. The next
@@ -57,7 +75,7 @@ if the previous job failed, its parts are carried along in the new job.
 
 ## Local UI
 `lesson-record ui` starts a server on **127.0.0.1 and a free port**, prints a link with a per-launch random token and opens it. Big Start / Pause / Stop,
-live level meter, elapsed time, notebook / title / kind pickers, "add to existing note", recent notes with their worker state, and the worker heartbeat
+live level meter, elapsed time, notebook / title / kind pickers, spoken language, topic, details and a photo picker (files are uploaded to the local server, re-encoded there, used on Start), "add to existing note", recent notes with their worker state, and the worker heartbeat
 (read from the data repo, same data as `lesson-worker status`). `lesson-record ui --stop` closes it; it also closes itself after 30 idle minutes (never while recording).
 Security (any web page can reach 127.0.0.1): every request and the websocket need the token (HttpOnly SameSite=Strict cookie, set when you open the printed link),
 an exact `Host` (127.0.0.1:port / localhost:port), a matching `Origin` (required for POST and websocket), `Sec-Fetch-Site` same-origin, and POST bodies are JSON only.

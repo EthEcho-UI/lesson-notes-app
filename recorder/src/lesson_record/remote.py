@@ -8,7 +8,7 @@ import time
 
 from lesson_worker.ghapi import ApiError, GitHub, NetworkError
 
-from .common import ConfigError, now_iso, read_json, write_json
+from .common import LANGUAGE_MODES, ConfigError, now_iso, read_json, write_json
 
 log = logging.getLogger("lesson_record.remote")
 MAX_NOTES = 60
@@ -85,7 +85,8 @@ class Remote:
                 continue
             st = doc(f"notes/{nid}/status.json") or {}
             notes.append({"id": nid, "kind": n.get("kind"), "title": n.get("title"), "notebook_id": n.get("notebook_id"),
-                          "created_at": n.get("created_at"), "source": n.get("source"), "language": n.get("language"),
+                          "created_at": n.get("created_at"), "source": n.get("source"), "schema_version": n.get("schema_version"),
+                          "language_mode": n.get("language_mode"), "context": n.get("context"), "images": n.get("images", []),
                           "parts": n.get("parts", []), "state": st.get("state"), "progress": st.get("progress"),
                           "error": (st.get("error") or {}).get("message") if st.get("state") == "failed" else None,
                           "status_job_id": st.get("job_id")})
@@ -123,3 +124,8 @@ class Remote:
     def diarize_default(self, kind):
         s = (self.cached().get("settings") or {}).get("diarize_default") or {}
         return bool(s.get(kind, kind == "meeting"))
+
+    def default_language_mode(self, rcfg):
+        """settings/app.json `default_language_mode` (if the app ever sets one), else recorder.toml, else mixed."""
+        m = (self.cached().get("settings") or {}).get("default_language_mode")
+        return m if m in LANGUAGE_MODES else rcfg.language_mode

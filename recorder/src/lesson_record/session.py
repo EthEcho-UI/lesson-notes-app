@@ -10,7 +10,8 @@ import time
 from pathlib import Path
 
 from . import finalize as fin
-from .common import Paths, now_iso, read_json, ulid, write_json
+from . import photos as photomod
+from .common import LANGUAGE_MODES, Paths, now_iso, read_json, ulid, write_json
 from .recorder import acquire_lock, lock_is_held
 from .remote import Remote, RemoteError
 from .submit import process_outbox
@@ -37,14 +38,49 @@ def _pid(paths):
 
 
 # ---------------------------------------------------------------------------------------------------
+def resolve_inputs(remote, rcfg, existing, notebook_name, *, language_mode=None, topic=None, details=None):
+    """Language mode + context of a recording -> (language_mode, context, overrides).
+    New note: given values or defaults (subject = notebook name), overrides = {}. Existing note: its own values; `overrides` holds only
+    what was given AND differs, and is applied on top of the live note.json at hand-off."""
+    if language_mode is not None and language_mode not in LANGUAGE_MODES:
+        raise SessionError(f"language mode must be one of: {', '.join(LANGUAGE_MODES)}")
+    topic = None if topic is None else topic.strip()
+    details = None if details is None else details.strip()
+    if topic is not None and len(topic) > 300:
+        raise SessionError("topic is longer than 300 characters")
+    if details is not None and len(details) > 2000:
+        raise SessionError("details are longer than 2000 characters")
+    base_ctx = (existing or {}).get("context") or {"subject": notebook_name[:200] or "?", "topic": "", "details": ""}
+    base_mode = (existing or {}).get("language_mode") or remote.default_language_mode(rcfg)
+    mode = language_mode or base_mode
+    ctx = {"subject": base_ctx["subject"], "topic": base_ctx["topic"] if topic is None else topic,
+           "details": base_ctx["details"] if details is None else details}
+    overrides = {}
+    if existing is not None:
+        if mode != base_mode:
+            overrides["language_mode"] = mode
+        for k in ("topic", "details"):
+            if ctx[k] != base_ctx[k]:
+                overrides[k] = ctx[k]
+    return mode, ctx, overrides
+
+
 def start(wcfg, rcfg, paths, *, kind="lesson", mode=None, notebook=None, title=None, note=None, language=None, diarize=None,
-          wait=12.0, remote=None):
+          language_mode=None, topic=None, details=None, images=(), wait=12.0, remote=None):
     paths.ensure()
     wait = float(os.environ.get("LESSON_RECORD_START_TIMEOUT", wait))
     if kind not in ("lesson", "meeting"):
         raise SessionError("kind must be lesson or meeting")
     if mode not in (None, "mic", "meeting"):
         raise SessionError("mode must be mic or meeting")
+    if language in LANGUAGE_MODES and not language_mode:              # old `--language cs|en` spelling
+        language_mode = language
+    prepared = []
+    for i, src in enumerate(images or (), 1):                          # fail before anything starts
+        try:
+            prepared.append((src, *photomod.prepare_file(src)))
+        except photomod.PhotoError as e:
+            raise SessionError(str(e))
     orphan = recover(wcfg, rcfg, paths, submit=False) if is_orphan(paths) else []
     if lock_is_held(paths):
         st = read_state(paths)
@@ -63,11 +99,12 @@ def start(wcfg, rcfg, paths, *, kind="lesson", mode=None, notebook=None, title=N
         if n is None:                                  # recorded here, not announced yet (offline)
             e = next((e for e in fin.outbox_entries(paths) if e["note"]["id"] == note), None)
             if e:
-                n = {**e["note"], "notebook_id": e["note"]["notebook_id"], "parts": e["parts"]}
+                n = {**e["note"], "notebook_id": e["note"]["notebook_id"], "parts": e["parts"], "images": e.get("images", [])}
         if n is None:
             raise SessionError(f"unknown note {note}; see: lesson-record list-notes")
         kind, notebook_id, title = n["kind"], n["notebook_id"], n["title"]
-        language = language or n.get("language")
+        nb = next((x for x in remote.cached().get("notebooks", []) if x["id"] == notebook_id), None)
+        notebook_name = nb["name"] if nb else "?"
     else:
         if not notebook:
             default_nb = (remote.cached().get("settings") or {}).get("default_notebook_id")
@@ -75,12 +112,15 @@ def start(wcfg, rcfg, paths, *, kind="lesson", mode=None, notebook=None, title=N
                 raise SessionError("--notebook is required for a new note")
             notebook = default_nb
         try:
-            notebook_id = remote.resolve_notebook(notebook)["id"]
+            nbk = remote.resolve_notebook(notebook)
+            notebook_id, notebook_name = nbk["id"], nbk["name"]
         except RemoteError as e:
             raise SessionError(str(e))
         title = (title or "").strip() or f"{'Lesson' if kind == 'lesson' else 'Meeting'} {time.strftime('%Y-%m-%d %H:%M')}"
-    if not language:
-        language = (remote.cached().get("settings") or {}).get("default_language") or rcfg.language
+    lmode, context, overrides = resolve_inputs(remote, rcfg, n, notebook_name, language_mode=language_mode, topic=topic, details=details)
+    have_images = [i for i in ((n or {}).get("images") or [])]
+    if len(have_images) + len(prepared) > photomod.MAX_IMAGES:
+        raise SessionError(f"a note can have at most {photomod.MAX_IMAGES} photos ({len(have_images)} already attached)")
     if diarize is None:
         diarize = remote.diarize_default(kind)
     mode = mode or ("meeting" if kind == "meeting" else "mic")
@@ -88,7 +128,13 @@ def start(wcfg, rcfg, paths, *, kind="lesson", mode=None, notebook=None, title=N
     rec_dir = paths.active / rec_id
     rec_dir.mkdir(parents=True)
     meta = {"rec_id": rec_id, "job_id": ulid(), "note_id": note or ulid(), "new_note": not note, "kind": kind, "mode": mode,
-            "notebook_id": notebook_id, "title": title[:200], "language": language, "diarize": bool(diarize), "started_at": now_iso()}
+            "notebook_id": notebook_id, "title": title[:200], "language_mode": lmode, "context": context, "overrides": overrides,
+            "diarize": bool(diarize), "started_at": now_iso(), "photos": []}
+    if prepared:
+        (rec_dir / "photos").mkdir()
+        for k, (src, data, w, h) in enumerate(prepared, 1):
+            (rec_dir / "photos" / f"{k:02d}.jpg").write_bytes(data)
+            meta["photos"].append({"src": f"photos/{k:02d}.jpg", "width": w, "height": h})
     write_json(rec_dir / "meta.json", meta)
     logf = open(rec_dir / "daemon.log", "ab")
     cmd = [sys.executable, "-m", "lesson_record.recorder", str(rec_dir)]

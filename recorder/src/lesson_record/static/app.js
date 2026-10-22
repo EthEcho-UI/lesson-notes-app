@@ -5,11 +5,12 @@
     pill: $("pill"), what: $("what"), clock: $("clock"), bar: $("bar"), peak: $("peak"), warnings: $("warnings"), capture: $("capture"),
     start: $("btn-start"), pause: $("btn-pause"), stop: $("btn-stop"), existing: $("existing"), notebook: $("notebook"), title: $("title"),
     banner: $("banner"), worker: $("worker"), notes: $("notes"), notesmsg: $("notesmsg"), outbox: $("outbox"), hint: $("meetinghint"),
-    refresh: $("refresh"),
+    refresh: $("refresh"), langmode: $("langmode"), topic: $("topic"), details: $("details"), photofile: $("photofile"), photolist: $("photolist"),
   };
   let rec = { state: "idle" };
   let remote = { notes: [], notebooks: [] };
   let busy = false;
+  let photos = [];          // {id, name, bytes} already uploaded to the local server, waiting for Start
 
   function fmt(s) {
     s = Math.max(0, Math.floor(s || 0));
@@ -47,7 +48,7 @@
     el.capture.textContent = active && (c.mic || c.monitor)
       ? "capturing: " + [c.mic && ("mic " + c.mic), c.monitor && ("system " + c.monitor)].filter(Boolean).join("  +  ") + (rec.capture_restarts ? "  (followed device changes: " + rec.capture_restarts + ")" : "")
       : "";
-    document.querySelectorAll("#form input, #form select").forEach((x) => { x.disabled = active; });
+    document.querySelectorAll("#form input, #form select, #form textarea").forEach((x) => { x.disabled = active; });
     if (!active) lockForExisting();
     if (rec.last && !rec.last.ok && s === "idle" && rec.last.message) banner("Last recording was not saved: " + rec.last.message, true);
   }
@@ -100,6 +101,8 @@
     el.notebook.disabled = lock; el.title.disabled = lock;
     document.querySelectorAll("input[name=kind]").forEach((x) => { x.disabled = lock; });
     if (n) {
+      if (n.language_mode) el.langmode.value = n.language_mode;
+      if (n.context && document.activeElement !== el.topic && document.activeElement !== el.details) { el.topic.value = n.context.topic || ""; el.details.value = n.context.details || ""; }
       el.notebook.value = n.notebook_id; el.title.value = n.title;
       document.getElementById("kind-" + n.kind).checked = true;
     }
@@ -113,8 +116,10 @@
     busy = false; await loadState();
   }
   el.start.addEventListener("click", () => act(async () => {
-    const body = { kind: kind(), notebook_id: el.notebook.value, title: el.title.value, note_id: el.existing.value || null };
+    const body = { kind: kind(), notebook_id: el.notebook.value, title: el.title.value, note_id: el.existing.value || null,
+      language_mode: el.langmode.value, topic: el.topic.value, details: el.details.value, photo_ids: photos.map((p) => p.id) };
     await api("/api/start", body);
+    photos = []; renderPhotos(); el.topic.value = ""; el.details.value = "";
   }));
   el.stop.addEventListener("click", () => act(async () => {
     const r = await api("/api/stop", {});
@@ -126,6 +131,33 @@
   el.refresh.addEventListener("click", () => loadRemote(true));
   el.existing.addEventListener("change", lockForExisting);
   document.querySelectorAll("input[name=kind]").forEach((x) => x.addEventListener("change", lockForExisting));
+
+  function renderPhotos() {
+    el.photolist.replaceChildren(...photos.map((p) => {
+      const li = document.createElement("li");
+      li.textContent = p.name + " (" + Math.round(p.bytes / 1024) + " KiB) ";
+      const b = document.createElement("button"); b.type = "button"; b.className = "small"; b.textContent = "remove";
+      b.addEventListener("click", async () => { try { await api("/api/photo/remove", { id: p.id }); } catch (e) { /* gone already */ } photos = photos.filter((x) => x.id !== p.id); renderPhotos(); });
+      li.append(b);
+      return li;
+    }));
+  }
+  function readB64(file) {
+    return new Promise((resolve, reject) => {
+      const r = new FileReader();
+      r.onload = () => resolve(String(r.result).split(",")[1] || "");
+      r.onerror = () => reject(new Error("cannot read " + file.name));
+      r.readAsDataURL(file);
+    });
+  }
+  el.photofile.addEventListener("change", async () => {
+    const files = Array.from(el.photofile.files || []);
+    el.photofile.value = "";
+    for (const f of files) {
+      try { photos.push((await api("/api/photo", { name: f.name, data: await readB64(f) })).photo); renderPhotos(); }
+      catch (e) { banner(f.name + ": " + e.message, true); }
+    }
+  });
 
   async function loadState() {
     try { rec = (await api("/api/state")).recorder; renderRec(); renderOutbox(); } catch (e) { banner("Lost contact with the local recorder UI server: " + e.message, true); }

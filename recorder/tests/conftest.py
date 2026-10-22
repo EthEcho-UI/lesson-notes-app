@@ -142,3 +142,12 @@ def pwenv(pw, monkeypatch, home):
     for p in pw.players:
         if p.poll() is None:
             p.terminate()
+
+
+@pytest.fixture
+def ui_app(ctx, gh):
+    from lesson_record.ui import UIApp
+    app = UIApp(ctx.wcfg, ctx.rcfg, ctx.paths)
+    app.start_thread()
+    yield app
+    app.shutdown()

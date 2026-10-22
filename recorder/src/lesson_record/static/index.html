@@ -50,6 +50,25 @@
       <label for="title">Title</label>
       <input id="title" type="text" maxlength="200" autocomplete="off" placeholder="optional, e.g. Mitosis">
     </div>
+    <div class="row">
+      <label for="langmode">Spoken language</label>
+      <select id="langmode"><option value="mixed">Czech + English (mixed)</option><option value="cs">Czech</option><option value="en">English</option></select>
+    </div>
+    <div class="row">
+      <label for="topic">Topic</label>
+      <input id="topic" type="text" maxlength="300" autocomplete="off" placeholder="what the lesson is about (helps the AI)">
+    </div>
+    <div class="row">
+      <label for="details">Details</label>
+      <textarea id="details" rows="3" maxlength="2000" placeholder="optional: key terms, teacher, what will be on the test"></textarea>
+    </div>
+    <div class="row">
+      <label for="photofile">Photos</label>
+      <div>
+        <input id="photofile" type="file" accept="image/*" multiple>
+        <ul id="photolist" class="photolist"></ul>
+      </div>
+    </div>
     <p class="hint" id="meetinghint" hidden>Recording other people may require their consent.</p>
   </section>
 

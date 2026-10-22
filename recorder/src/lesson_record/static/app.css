@@ -46,7 +46,7 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 3px s
 .capture { margin-top: 10px; font-size: .75rem; color: var(--muted); word-break: break-all; }
 .row { display: grid; grid-template-columns: 90px 1fr; gap: 10px; align-items: center; margin-bottom: 10px; }
 .row > label { color: var(--muted); font-size: .9rem; }
-select, input[type=text] { width: 100%; font: inherit; padding: 9px 10px; border-radius: 10px; border: 1px solid var(--line); background: var(--bg); color: var(--fg); }
+select, input[type=text], textarea { width: 100%; font: inherit; padding: 9px 10px; border-radius: 10px; border: 1px solid var(--line); background: var(--bg); color: var(--fg); }
 .seg { display: flex; flex-wrap: wrap; gap: 8px; }
 .seg input { position: absolute; opacity: 0; pointer-events: none; }
 .seg label { padding: 8px 12px; border: 1px solid var(--line); border-radius: 10px; cursor: pointer; font-size: .9rem; }
@@ -71,3 +71,5 @@ select, input[type=text] { width: 100%; font: inherit; padding: 9px 10px; border
   .big.start { grid-column: 1 / -1; }
 }
 @media (prefers-reduced-motion: reduce) { .bar, .peakmark { transition: none; } }
+.photolist { list-style: none; margin: .4rem 0 0; padding: 0; font-size: .9rem; }
+.photolist li { margin: .2rem 0; }

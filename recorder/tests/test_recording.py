@@ -48,7 +48,7 @@ def test_start_stop_creates_valid_note_job_and_part(ctx, gh, fake_tone):
     job = inbox_job(note_id)
     contract.check("job", job)
     assert job["audio_location"] == "local" and job["source"] == "laptop" and job["action"] == "transcribe"
-    assert job["append"] is False and job["options"]["diarize"] is False and job["kind"] == "lesson" and job["language"] == "cs"
+    assert job["append"] is False and job["options"]["diarize"] is False and job["kind"] == "lesson" and job["schema_version"] == 2 and job["language_mode"] == "mixed" and "language" not in job
     assert job["parts"] == [{"id": "p01", "order": 1, "file": "parts/01.opus", "bytes": p["bytes"], "sha256": p["sha256"], "duration": p["duration"]}]
     assert not any(ctx.paths.active.iterdir())                               # recording dir cleaned up
     assert state(ctx.paths)["state"] == "idle"

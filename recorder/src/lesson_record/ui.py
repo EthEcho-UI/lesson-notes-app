@@ -30,6 +30,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from importlib import resources
 from urllib.parse import parse_qs, urlparse
 
+from . import photos as photomod
 from . import session
 from .common import read_json, write_json
 from .recorder import lock_is_held
@@ -41,6 +42,8 @@ STATIC = {"/": ("index.html", "text/html; charset=utf-8"), "/app.js": ("app.js",
           "/app.css": ("app.css", "text/css; charset=utf-8")}
 WS_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
 MAX_BODY = 16 * 1024
+MAX_PHOTO_BODY = 24 * 1024 * 1024       # /api/photo only: one picture as base64 (the server re-encodes it to <= 600 KiB)
+MAX_STAGED = 12
 
 
 class UIApp:
@@ -50,6 +53,8 @@ class UIApp:
         self.launch_token = secrets.token_urlsafe(32)            # in the opened URL only; single use, then dead (the URL shows up in argv/history)
         self._launch_lock = threading.Lock()
         self._launch_used = False
+        self.staged = {}                                          # photo id -> (jpeg bytes, width, height, name) picked in the form, not yet used
+        self._staged_lock = threading.Lock()
         self.remote = Remote(wcfg, paths)
         self.cookie_name = None
         self.server = ThreadingHTTPServer(("127.0.0.1", port), self._handler())
@@ -110,6 +115,7 @@ class UIApp:
         for n in c.get("notes", [])[:40]:
             notes.append({"id": n["id"], "title": n["title"], "kind": n["kind"], "notebook": nb.get(n["notebook_id"], "?"), "notebook_id": n["notebook_id"],
                           "created": (n["created_at"] or "")[:16].replace("T", " "), "parts": len(n["parts"]),
+                          "language_mode": n.get("language_mode"), "context": n.get("context"), "images": len(n.get("images") or []),
                           "seconds": sum(p.get("duration") or 0 for p in n["parts"]), "state": n["state"], "error": n.get("error")})
         hb = c.get("heartbeat")
         w = None
@@ -227,7 +233,7 @@ class UIApp:
                     n = int(self.headers.get("Content-Length", "0"))
                 except ValueError:
                     n = -1
-                if n < 0 or n > MAX_BODY:
+                if n < 0 or n > (MAX_PHOTO_BODY if u.path == "/api/photo" else MAX_BODY):
                     return self._send(413, {"ok": False, "error": "body too large"})
                 try:
                     body = json.loads(self.rfile.read(n) or b"{}")
@@ -313,16 +319,65 @@ class UIApp:
                 return True
         return H
 
+    def _start(self, body, files):
+        return session.start(self.wcfg, self.rcfg, self.paths, kind=body.get("kind") or "lesson", notebook=body.get("notebook_id") or None,
+                             title=body.get("title") or None, note=body.get("note_id") or None, remote=self.remote,
+                             diarize=body.get("diarize") if isinstance(body.get("diarize"), bool) else None,
+                             language_mode=body.get("language_mode") or None, topic=body.get("topic"), details=body.get("details"),
+                             images=files)
+
     # ---- POST actions ----------------------------------------------------------------------------------
     def action(self, path, body):
         if path == "/api/start":
-            for k, mx in (("title", 200), ("notebook_id", 64), ("note_id", 64), ("kind", 16)):
+            for k, mx in (("title", 200), ("notebook_id", 64), ("note_id", 64), ("kind", 16), ("language_mode", 8), ("topic", 300), ("details", 2000)):
                 if body.get(k) is not None and (not isinstance(body[k], str) or len(body[k]) > mx):
                     raise ValueError(f"bad {k}")
-            st = session.start(self.wcfg, self.rcfg, self.paths, kind=body.get("kind") or "lesson", notebook=body.get("notebook_id") or None,
-                               title=body.get("title") or None, note=body.get("note_id") or None, remote=self.remote,
-                               diarize=body.get("diarize") if isinstance(body.get("diarize"), bool) else None)
+            ids = body.get("photo_ids") or []
+            if not isinstance(ids, list) or not all(isinstance(i, str) for i in ids):
+                raise ValueError("bad photo_ids")
+            with self._staged_lock:
+                missing = [i for i in ids if i not in self.staged]
+                if missing:
+                    raise ValueError("a picked photo is no longer available; pick it again")
+                picked = [self.staged[i] for i in ids]
+            tmp = self.paths.state / "ui-photos"
+            tmp.mkdir(parents=True, exist_ok=True)
+            files = []
+            for k, (data, _w, _h, _name) in enumerate(picked):
+                f = tmp / f"{secrets.token_hex(8)}-{k}.jpg"
+                f.write_bytes(data)
+                files.append(str(f))
+            try:
+                st = self._start(body, files)
+            finally:
+                for f in files:
+                    try:
+                        os.unlink(f)
+                    except OSError:
+                        pass
+            with self._staged_lock:
+                for i in ids:
+                    self.staged.pop(i, None)
             return {"recorder": st}
+        if path == "/api/photo":
+            name, b64 = body.get("name"), body.get("data")
+            if not isinstance(name, str) or not isinstance(b64, str):
+                raise ValueError("name and data (base64) required")
+            with self._staged_lock:
+                if len(self.staged) >= MAX_STAGED:
+                    raise ValueError(f"at most {MAX_STAGED} photos")
+            try:
+                data, w, h = photomod.prepare_bytes(base64.b64decode(b64, validate=True), name[:60])
+            except (photomod.PhotoError, ValueError) as e:
+                raise ValueError(str(e))
+            pid = secrets.token_hex(8)
+            with self._staged_lock:
+                self.staged[pid] = (data, w, h, name[:60])
+            return {"photo": {"id": pid, "name": name[:60], "width": w, "height": h, "bytes": len(data)}}
+        if path == "/api/photo/remove":
+            with self._staged_lock:
+                self.staged.pop(str(body.get("id")), None)
+            return {}
         if path == "/api/stop":
             return {"last": session.stop(self.wcfg, self.rcfg, self.paths)}
         if path == "/api/pause":

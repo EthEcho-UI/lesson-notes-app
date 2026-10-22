@@ -44,6 +44,24 @@ def next_order(paths, remote_note, note_id):
     return top + 1
 
 
+def next_image_numbers(paths, remote_note, note_id, count):
+    """`count` free photo numbers (ids iNN): above everything on the note (GitHub/cache), in unsent outbox entries and in the local photo dir."""
+    top = 0
+    if remote_note:
+        top = max([int(i["id"][1:]) for i in remote_note.get("images") or []] or [0])
+    for e in outbox_entries(paths):
+        if e["note"]["id"] == note_id:
+            top = max([top] + [int(i["id"][1:]) for i in e.get("images", [])])
+    d = paths.local_audio / note_id / "images"
+    for f in d.glob("*.*") if d.is_dir() else []:
+        m = re.match(r"(\d{2})\.", f.name)
+        if m:
+            top = max(top, int(m.group(1)))
+    if top + count > 99:
+        raise NoAudio("too_many_images", "a note can have at most 99 photo numbers; remove old photos first")
+    return list(range(top + 1, top + count + 1))
+
+
 def _quarantine(paths, rec_dir, reason):
     dest = paths.failed / rec_dir.name
     if dest.exists():
@@ -77,6 +95,17 @@ def finalize(paths, rec_dir: Path, meta: dict, remote_note=None) -> dict:
         base = next_order(paths, remote_note if not meta["new_note"] else None, meta["note_id"])
         if base + len(segs) - 1 > 50:
             raise NoAudio("too_many_parts", "a note can have at most 50 parts")
+        photos = meta.get("photos") or []
+        if len((remote_note or {}).get("images") or []) + len(photos) > 12:
+            raise NoAudio("too_many_images", "a note can have at most 12 photos")
+        images = []
+        for num, ph in zip(next_image_numbers(paths, remote_note if not meta["new_note"] else None, meta["note_id"], len(photos)), photos):
+            sha, nbytes = media.sha256_file(rec_dir / ph["src"])
+            im = {"id": f"i{num:02d}", "filename": f"{num:02d}.jpg", "file": f"images/{num:02d}.jpg", "bytes": nbytes, "sha256": sha,
+                  "width": ph["width"], "height": ph["height"], "src": ph["src"]}
+            if ph.get("caption"):
+                im["caption"] = ph["caption"][:200]
+            images.append(im)
         parts = []
         for i, (s, dur, size) in enumerate(segs):
             order = base + i
@@ -85,11 +114,10 @@ def finalize(paths, rec_dir: Path, meta: dict, remote_note=None) -> dict:
                           "bytes": nbytes, "sha256": sha, "duration": dur, "src": s.name})
         entry = {"schema": 1, "rec_id": meta["rec_id"], "state": "finalizing", "finalized_at": now_iso(), "attempts": 0, "last_error": None,
                  "note": {"id": meta["note_id"], "new": meta["new_note"], "kind": meta["kind"], "title": meta["title"],
-                          "notebook_id": meta["notebook_id"], "language": meta["language"], "created_at": meta["started_at"],
-                          "recorded_at": meta["started_at"]},
-                 "job": {"job_id": meta["job_id"], "kind": meta["kind"], "language": meta["language"], "diarize": meta["diarize"],
-                         "created_at": now_iso()},
-                 "parts": parts}
+                          "notebook_id": meta["notebook_id"], "created_at": meta["started_at"], "recorded_at": meta["started_at"],
+                          "language_mode": meta["language_mode"], "context": meta["context"], "overrides": meta.get("overrides") or {}},
+                 "job": {"job_id": meta["job_id"], "kind": meta["kind"], "diarize": meta["diarize"], "created_at": now_iso()},
+                 "parts": parts, "images": images}
         write_json(entry_path, entry)                       # recorded before anything moves: a crash from here on resumes
     if entry["state"] == "finalizing":
         dest_dir = paths.local_audio / entry["note"]["id"] / "parts"
@@ -103,6 +131,17 @@ def finalize(paths, rec_dir: Path, meta: dict, remote_note=None) -> dict:
             sha, nbytes = media.sha256_file(dst)
             if (sha, nbytes) != (p["sha256"], p["bytes"]):
                 raise NoAudio("part_changed", f"{dst} changed after it was measured")
+        if entry.get("images"):
+            idir = paths.local_audio / entry["note"]["id"] / "images"        # where the worker reads photos of audio_location=local jobs
+            idir.mkdir(parents=True, exist_ok=True)
+            for im in entry["images"]:
+                src, dst = rec_dir / im["src"], idir / im["filename"]
+                if src.exists():
+                    shutil.move(str(src), str(dst))
+                elif not dst.exists():
+                    raise NoAudio("photo_lost", f"photo {im['src']} vanished during finalize")
+                if media.sha256_file(dst) != (im["sha256"], im["bytes"]):
+                    raise NoAudio("photo_changed", f"{dst} changed after it was measured")
         entry["state"] = "pending"
         write_json(entry_path, entry)
     shutil.rmtree(rec_dir, ignore_errors=True)

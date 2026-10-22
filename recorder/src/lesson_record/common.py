@@ -12,6 +12,7 @@ from lesson_worker.config import Config as WorkerConfig, ConfigError, home, load
 
 RATE = 16000                 # capture/encode sample rate (mono, s16le)
 BYTES_PER_SEC = RATE * 2
+LANGUAGE_MODES = ("cs", "en", "mixed")
 CROCKFORD = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"
 
 
@@ -68,7 +69,8 @@ class RecorderConfig:
     mic_source: str = ""              # pulse source name; empty = follow the default source
     silent_warn_s: float = 10.0
     silent_db: float = -60.0          # peak below this for silent_warn_s -> warning
-    language: str = "cs"
+    language: str = "cs"              # v1 leftover, accepted and ignored (notes are always Czech; the audio language is language_mode)
+    language_mode: str = "mixed"      # cs | en | mixed: default for new notes when neither the command line nor settings/app.json say
 
 
 def load_recorder_config() -> RecorderConfig:
@@ -81,6 +83,8 @@ def load_recorder_config() -> RecorderConfig:
             if k not in known:
                 raise ConfigError(f"{p}: unknown setting '{k}'")
             setattr(cfg, k, v)
+    if cfg.language_mode not in LANGUAGE_MODES:
+        raise ConfigError(f"{p}: language_mode must be one of {', '.join(LANGUAGE_MODES)}")
     return cfg
 
 

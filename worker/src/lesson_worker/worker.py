@@ -738,7 +738,7 @@ class Worker:
 
     def _image_changes(self, job, st):
         """Files to add/delete under notes/<id>/images/ in the completion commit and the resulting images_kept ids.
-        Copies `inbox` photos that note.json still lists (re-read now: the user may have deleted one meanwhile),
+        Copies `inbox` and `local` (laptop-recorded) photos that note.json still lists (re-read now: the user may have deleted one meanwhile),
         deletes orphans (files note.json no longer lists). Without a readable note.json nothing is deleted."""
         note = job.note_id
         prefix = f"notes/{note}/images/"
@@ -749,7 +749,7 @@ class Worker:
         changes = {}
         for it in st.get("_img", []):
             spec = it["spec"]
-            if spec["location"] != "inbox" or (listed is not None and spec["id"] not in listed):
+            if spec["location"] not in ("inbox", "local") or (listed is not None and spec["id"] not in listed):
                 continue
             path = f"notes/{note}/{spec['file']}"
             data = it.get("clean")

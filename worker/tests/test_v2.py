@@ -363,3 +363,17 @@ def test_notes_error_stage_and_photos_stay_on_inbox_for_retry(w, notes, gh):
     st = main_json(f"notes/{nid}/status.json")
     assert st["state"] == "failed" and st["error"]["stage"] == "summarize"
     assert any(p.endswith("images/01.jpg") for p in inbox_files())            # kept for the retry
+
+
+def test_local_photos_of_a_laptop_recording_are_kept_on_main(w, asr, notes, tmp_path):
+    """b9 finding: photos with location=local were shown to the notes engine but not copied to notes/<id>/images/."""
+    nid = ulid(11)
+    raw = jpeg_with_exif()
+    put_note(nid, images=[("i01", "jpg")])
+    put_job(note_id=nid, durations=(2.0,), language_mode="cs", location="local", local_dir=w.cfg.local_audio_dir,
+            images=[{"data": raw, "ext": "jpg", "location": "local", "id": "i01"}])
+    w.drain()
+    st = main_json(f"notes/{nid}/status.json")
+    assert st["state"] == "done" and st["images_kept"] == ["i01"]
+    stored = main_bytes(f"notes/{nid}/images/01.jpg")
+    assert stored and b"SecretCameraMaker" not in stored

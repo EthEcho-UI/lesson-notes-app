@@ -39,7 +39,7 @@ The file must be mode 600 (the worker refuses to start otherwise: `chmod 600 ~/.
 | `whisper_threads` | 8 | CPU threads for Whisper (benchmark used 12; lower = nicer to other jobs) |
 | `whisper_initial_prompt` | empty | static text always given to Whisper |
 | `whisper_hint_mode` / `whisper_hint_chars` | `hotwords` / 400 | per-note context (subject, topic, details) -> short vocabulary hint for Whisper: `hotwords` (applied to every 30 s window) \| `initial_prompt` (first window only) \| `off` |
-| `mixed_first_pass`, `mixed_check`, `mixed_min_logprob`, `mixed_switch_prob`, `mixed_check_min_s` | `auto`, `hybrid`, -0.7, 0.6, 1.0 | `language_mode=mixed` tuning, see "Languages" |
+| `mixed_gap_ms`, `mixed_max_unit_s`, `mixed_min_unit_s` | 500, 25, 1.0 | `language_mode=mixed`: utterance splitting, see "Languages" |
 | `image_gc_interval_s` | 3600 | how often orphan photos on main are removed |
 | `diarize_threshold` | 0.9 | speaker clustering threshold (higher = fewer speakers) |
 | `claude_path` | `~/.local/bin/claude`, then PATH | |
@@ -57,7 +57,7 @@ Settings that come from the repo (`settings/app.json`): `failed_audio_retention_
 `download-models` | `init-config`. `-v` for debug logs, `--config PATH` for another config.
 
 ## Languages, context, photos (contract v2)
-- **Languages**: `language_mode` of the job: `cs`/`en` force that language; `mixed` = first pass in the dominant cs/en language (language-id probe on 3 windows), then segments that look suspicious (low confidence, or the text looks like the other language) get a language-id check on their audio; segments detected as the other of cs/en are re-decoded in it, segments detected as a third language are re-decoded in the dominant cs/en language (first guess kept in `lang_detected`). Every segment has `lang`. Measurements: `output/b7-REPORT.md`.
+- **Languages**: `language_mode` of the job: `cs`/`en` force that language; `mixed` = the audio is split at pauses (>= 500 ms) into utterances, each utterance is language-identified (Whisper language-id) and decoded in its language; utterances detected as a third language (sk, ru, ...) and too-short ones get the dominant cs/en language (first guess kept in `lang_detected`). Costs about 1.6-2x the time of a forced run. Every segment has `lang`. Measurements and limits (an English phrase inside one Czech sentence without a pause is not separated): `output/b7-REPORT.md`.
 - **Context -> Whisper**: subject/topic/details become a <= 400 char hint passed as `hotwords`; part of the ASR cache key. Notes get the full context.
 - **Photos**: `job.images[]` are fetched (inbox / main / laptop cache) and sha256-verified up front (`sha_mismatch`); in state `reading_images` Pillow validates them and removes EXIF/GPS/XMP/comments (lossless byte surgery; if an EXIF rotation exists the pixels are rotated first); the scrubbed copies go to the notes engine and, in the ONE completion commit, to `notes/<id>/images/NN.ext` (only photos still listed in note.json; orphans are deleted; `status.images_kept`). The inbox copies leave with the job. The worker never edits note.json.
 - **Old data**: v1 jobs are processed (v2 outputs); v1 transcripts get `lang: cs` when a part is appended; v1 notes are passed to the engine as `previous_notes`.

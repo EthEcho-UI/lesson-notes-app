@@ -42,11 +42,9 @@ class Config:
     whisper_initial_prompt: str = ""           # static text always passed to Whisper (before the per-note hint)
     whisper_hint_mode: str = "hotwords"        # per-note context -> Whisper: hotwords (every window) | initial_prompt (first window only) | off
     whisper_hint_chars: int = 400              # max length of the per-note vocabulary hint (~130-200 tokens)
-    mixed_first_pass: str = "auto"             # first decoding pass in language_mode=mixed: auto (language-id probe on 3 windows) | cs | en
-    mixed_check: str = "hybrid"                # mixed strategy: hybrid (forced pass + language-id on suspicious segments) | all (language-id on every segment)
-    mixed_min_logprob: float = -0.7            # hybrid: segments with avg_logprob below this get a language-id check
-    mixed_switch_prob: float = 0.6             # a segment switches language only if the detector gives the other cs/en language at least this probability
-    mixed_check_min_s: float = 1.0             # segments shorter than this are not checked (language-id is unreliable)
+    mixed_gap_ms: int = 500                    # language_mode=mixed: utterances are split at pauses >= this
+    mixed_max_unit_s: float = 25.0             # ... and cut at this length
+    mixed_min_unit_s: float = 1.0              # utterances shorter than this are not language-identified (they follow the previous one)
     whisper_idle_unload_s: float = 600.0
     diarize_threshold: float = 0.9
     diarize_threads: int = 4

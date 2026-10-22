@@ -31,30 +31,9 @@ def build_hint(cfg, ctx):
     return text
 
 
-_EN = frozenset("the and of to in is that it for with as was on are this be at by from or an have not but what all were when we there can your which their if do will each about how up out them then she many some so these would other into has more her two like him see time could no make than first been its who now people my made over did down only way find use may water long little very after words called just where most know".split())
-_CS = frozenset("a i o u v s k z se na je to že si by ale jako pro od do po při tak jak co ten ta že nebo jsou byl byla bylo být má mají tady když jsem jsme jsi není ještě už také jen než které který která kde proto potom protože tedy tohle toho".split())
-
-
-def text_language_guess(text):
-    """Cheap hint (not a decision) which of cs/en a decoded text looks like: Czech diacritics or Czech function words
-    -> cs, mostly English function words and no diacritics -> en, otherwise None. Used only to decide where a
-    (costly) audio language-id check is worthwhile."""
-    words = [w.strip(".,;:!?()\"'").lower() for w in text.split()]
-    words = [w for w in words if w]
-    if not words:
-        return None
-    if any(c in "ěščřžýáíéúůďťňó" for c in text.lower()):
-        return "cs"
-    en = sum(w in _EN for w in words)
-    cs = sum(w in _CS for w in words)
-    if en >= 2 and en > cs:
-        return "en"
-    return "cs" if cs > en else None
-
-
 def mixed_key(cfg):
     """Everything that changes the result of a mixed-mode run (part of the ASR cache key)."""
-    return [cfg.mixed_first_pass, cfg.mixed_check, cfg.mixed_min_logprob, cfg.mixed_switch_prob, cfg.mixed_check_min_s, 3]
+    return [cfg.mixed_gap_ms, cfg.mixed_max_unit_s, cfg.mixed_min_unit_s, 4]
 
 
 class Transcriber:
@@ -120,77 +99,55 @@ class Transcriber:
             return out
 
     # ---- mixed ------------------------------------------------------------------------------------
-    def _langid(self, audio, seg):
-        a = audio[max(0, int((seg["start"] - 0.1) * SR)): int((seg["end"] + 0.1) * SR)]
-        return self._detect(a)
-
     def _detect(self, a):
         lang, p, allp = self._model.detect_language(a)
         d = dict(allp)
         return lang, p, d.get("cs", 0.0), d.get("en", 0.0)
 
-    def _probe_first_language(self, audio):
-        """cs or en for the first pass: language-id on up to 3 speech windows spread over the recording (~2.5 s each)."""
-        from faster_whisper.vad import get_speech_timestamps
-        try:
-            chunks = get_speech_timestamps(audio)
-        except Exception:
-            chunks = []
-        if not chunks:
-            return "cs"
-        picks = {chunks[min(len(chunks) - 1, int(len(chunks) * q))]["start"] for q in (0.15, 0.5, 0.85)}
-        pc = pe = 0.0
-        for st in sorted(picks):
-            _top, _p, c, e = self._detect(audio[st: st + 30 * SR])
-            pc, pe = pc + c, pe + e
-        first = "en" if pe > pc else "cs"
-        log.info("mixed: first-pass language %s (probe cs=%.2f en=%.2f over %d windows)", first, pc / len(picks), pe / len(picks), len(picks))
-        return first
+    def _units(self, audio):
+        """Utterances: speech chunks separated by >= mixed_gap_ms of silence (silero VAD), at most mixed_max_unit_s long.
+        [(start_sample, end_sample)]"""
+        from faster_whisper.vad import VadOptions, get_speech_timestamps
+        cfg = self.cfg
+        opts = VadOptions(min_silence_duration_ms=int(cfg.mixed_gap_ms), max_speech_duration_s=float(cfg.mixed_max_unit_s), speech_pad_ms=150)
+        return [(c["start"], c["end"]) for c in get_speech_timestamps(audio, opts)]
 
     def _mixed(self, audio, duration, progress, hint):
+        """Per-utterance language: split at pauses, language-id each utterance (cs / en / other), decode each in its
+        language. Utterances detected as a third language, and ones too short to judge (< mixed_min_unit_s), get the
+        dominant cs/en language (by speech time, tie -> cs; a too-short one follows the previous utterance)."""
         cfg = self.cfg
-        first = cfg.mixed_first_pass if cfg.mixed_first_pass in ("cs", "en") else self._probe_first_language(audio)
-        other = "en" if first == "cs" else "cs"
-        segs = self._decode(audio, first, hint, progress=progress, duration=duration, lo=0.0, hi=85.0)
-        n = len(segs)
-        labels = []                                   # per segment: [lang | None (= resolve later), lang_detected | None]
-        for k, sg in enumerate(segs):
-            lang, det = first, None
-            if sg["end"] - sg["start"] >= cfg.mixed_check_min_s and self._suspicious(sg, other):
-                top, p, pcs, pen = self._langid(audio, sg)
-                if top == other and p >= cfg.mixed_switch_prob:
-                    lang = other
-                elif top not in (first, other):
-                    lang, det = None, top             # third language (sk, pl, ru ...): resolved with the dominant cs/en language
-            labels.append([lang, det])
+        units = self._units(audio)
+        total = max(sum(e - s for s, e in units), 1)
+        det, done = [], 0
+        for s0, e0 in units:                                  # phase 1: language-id (0..30 %)
+            if (e0 - s0) / SR >= cfg.mixed_min_unit_s:
+                top, _p, pcs, pen = self._detect(audio[s0:e0])
+                det.append(top)
+            else:
+                det.append(None)
+            done += e0 - s0
             if progress:
-                progress(85.0 + 15.0 * (k + 1) / max(n, 1))
-        tot = {"cs": 0.0, "en": 0.0}                  # dominant cs/en language by speech time (tie -> cs)
-        for sg, (lang, _d) in zip(segs, labels):
-            if lang:
-                tot[lang] += sg["end"] - sg["start"]
+                progress(30.0 * done / total)
+        tot = {"cs": 0.0, "en": 0.0}
+        for (s0, e0), d in zip(units, det):
+            if d in tot:
+                tot[d] += e0 - s0
         dominant = "en" if tot["en"] > tot["cs"] else "cs"
-        out = []
-        for sg, (lang, det) in zip(segs, labels):
-            lang = lang or dominant
-            text = sg["text"]
-            if lang != first:
-                text = self._redo(audio, sg, lang, hint) or text
-            d = {"start": sg["start"], "end": sg["end"], "text": text, "lang": lang}
-            if det and det != lang:
-                d["lang_detected"] = det
-            out.append(d)
+        out, prev, done = [], dominant, 0
+        for (s0, e0), d in zip(units, det):                   # phase 2: decode in the final language (30..100 %)
+            lang = d if d in ("cs", "en") else (prev if d is None else dominant)
+            prev = lang
+            pad0 = max(0, s0 - int(0.15 * SR))
+            for g in self._decode(audio[pad0:e0 + int(0.15 * SR)], lang, hint):
+                seg = {"start": round(pad0 / SR + g["start"], 2), "end": round(pad0 / SR + g["end"], 2), "text": g["text"], "lang": lang}
+                if d not in (None, "cs", "en"):
+                    seg["lang_detected"] = d
+                out.append(seg)
+            done += e0 - s0
+            if progress:
+                progress(30.0 + 70.0 * done / total)
         return out
-
-    def _suspicious(self, sg, other):
-        cfg = self.cfg
-        return (cfg.mixed_check == "all" or sg["lp"] < cfg.mixed_min_logprob or sg["cr"] > 2.4
-                or text_language_guess(sg["text"]) == other)
-
-    def _redo(self, audio, seg, lang, hint):
-        a = audio[max(0, int((seg["start"] - 0.15) * SR)): int((seg["end"] + 0.15) * SR)]
-        got = self._decode(a, lang, hint, vad=False)
-        return " ".join(g["text"] for g in got).strip()
 
     @property
     def engine(self):
